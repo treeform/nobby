@@ -2,18 +2,22 @@ import
   std/[strutils, times],
   taggy,
   models
+
 const
   AppTitle* = "Nobby, a bulletin board style forum"
   AppTagline* = "Visual forum inspired by the early 2000s message boards."
+
 type
   BoardRow* = object
     board*: Board
     topicCount*: int
     postCount*: int
     lastPost*: BoardLastPost
+
   TopicRow* = object
     topic*: Topic
     replyCount*: int
+
 proc esc(text: string): string =
   ## Escapes HTML special characters.
   result = text
@@ -21,14 +25,17 @@ proc esc(text: string): string =
   result = result.replace("<", "&lt;")
   result = result.replace(">", "&gt;")
   result = result.replace("\"", "&quot;")
+
 proc fmtEpoch(ts: int64): string =
   ## Formats Unix timestamp for page output.
   fromUnix(ts).utc.format("yyyy-MM-dd HH:mm:ss 'UTC'")
+
 proc sectionName(board: Board): string =
   ## Returns normalized section title for one board.
   result = board.section.strip()
   if result.len == 0:
     return "General Discussions"
+
 proc renderPagination(basePath: string, page: int, pages: int): string =
   ## Renders compact pagination links.
   renderFragment:
@@ -51,6 +58,7 @@ proc renderPagination(basePath: string, page: int, pages: int): string =
               a:
                 href basePath & "?page=" & $i
                 say $i
+
 proc renderLayout(pageTitle: string, content: string): string =
   ## Renders page shell and shared navigation.
   render:
@@ -84,6 +92,7 @@ proc renderLayout(pageTitle: string, content: string): string =
           say content
           p ".footer-note":
             say AppTagline
+
 proc renderErrorPage*(statusCode: int, message: string): string =
   ## Renders basic error page.
   let content = renderFragment:
@@ -100,6 +109,7 @@ proc renderErrorPage*(statusCode: int, message: string): string =
               href "/"
               say "Back to boards"
   renderLayout("Error", content)
+
 proc renderBoardIndex*(rows: seq[BoardRow]): string =
   ## Renders board index page.
   type
@@ -176,6 +186,7 @@ proc renderBoardIndex*(rows: seq[BoardRow]): string =
                 else:
                   say "No posts yet"
   renderLayout("Index", content)
+
 proc renderNewTopicForm(board: Board): string =
   ## Renders create-topic form.
   renderFragment:
@@ -214,6 +225,7 @@ proc renderNewTopicForm(board: Board): string =
                 button ".btn":
                   ttype "submit"
                   say "Post topic"
+
 proc renderBoardPage*(
   board: Board,
   rows: seq[TopicRow],
@@ -261,6 +273,7 @@ proc renderBoardPage*(
       say renderPagination(basePath, page, pages)
       say renderNewTopicForm(board)
   renderLayout(board.title, content)
+
 proc renderReplyForm(topic: Topic): string =
   ## Renders reply form for a topic.
   renderFragment:
@@ -292,6 +305,7 @@ proc renderReplyForm(topic: Topic): string =
                 button ".btn":
                   ttype "submit"
                   say "Post reply"
+
 proc renderTopicPage*(
   topic: Topic,
   posts: seq[Post],
