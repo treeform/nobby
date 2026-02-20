@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Retro Forum Style Guide</title>
+  <link rel="stylesheet" href="../data/style.css">
+</head>
+<body>
+  <main class="page">
+    <p class="smalltext">
+      <span class="maintitle">Retro Forum Style Guide</span><br>
+      A distilled visual guide inspired by early 2000s message boards.
+    </p>
+
+    <p class="navigation">
+      <a href="#index">Index</a>
+      <a href="#listing">Listing</a>
+      <a href="#post">Post</a>
+      <a href="#compose">Posting Form</a>
+      <a href="#tokens">Tokens</a>
+    </p>
+
+    <section id="index" class="section">
+      <table class="lineup">
+        <tr>
+          <td>
+            <span class="largetext"><b>Index View</b></span>
+            <span class="crumb smalltext">Root &gt; Forums</span>
+          </td>
+          <td class="right smalltext">
+            Sample of category and forum rows.
+          </td>
+        </tr>
+      </table>
+
+      <table class="grid">
+        <tr>
+          <td class="toprow center" colspan="4">Forum</td>
+          <td class="toprow center foldable">Topics</td>
+          <td class="toprow center foldable">Posts</td>
+          <td class="toprow center">Last Post</td>
+        </tr>
+        <tr>
+          <td class="catrow" colspan="7"><b>General</b></td>
+        </tr>
+        <tr>
+          <td class="row1 iconcell">
+            <img class="forum-icon" src="../data/images/forum-folder.svg" alt="Forum icon">
+          </td>
+          <td class="row2" colspan="3">
+            <a class="topiclink forumlink" href="#listing">Main Discussion</a><br>
+            <span class="smalltext">Everything from tooling to workflows.</span>
+          </td>
+          <td class="row1 center foldable mediumtext">121</td>
+          <td class="row2 center foldable mediumtext">4,892</td>
+          <td class="row1 right smalltext">Today, 13:05<br>by <a href="#" class="topiclink">User42</a></td>
+        </tr>
+        <tr>
+          <td class="row1 iconcell">
+            <img class="forum-icon" src="../data/images/forum-pin.svg" alt="Pinned forum icon">
+          </td>
+          <td class="row2" colspan="3">
+            <a class="topiclink forumlink" href="#listing">Guides and Examples</a><br>
+            <span class="smalltext">Curated resources and reference threads.</span>
+          </td>
+          <td class="row1 center foldable mediumtext">38</td>
+          <td class="row2 center foldable mediumtext">1,204</td>
+          <td class="row1 right smalltext">Yesterday, 22:11<br>by <a href="#" class="topiclink">AssemblerNerd</a></td>
+        </tr>
+      </table>
+    </section>
+
+    <section id="listing" class="section">
+      <table class="lineup">
+        <tr>
+          <td>
+            <span class="largetext"><b>Topic Listing View</b></span>
+            <span class="crumb smalltext">Forums &gt; Main Discussion</span>
+          </td>
+          <td class="right smalltext">Thread-centric table style.</td>
+        </tr>
+        <tr>
+          <td class="smalltext">
+            <div class="pagination">
+              <span class="label">Page</span><strong>1</strong> of <strong>12</strong>
+            </div>
+          </td>
+          <td class="right smalltext">
+            <div class="pagination">
+              <span class="label">Go to page</span>
+              <strong>1</strong>, <a href="#">2</a>, <a href="#">3</a>, <span class="pagination-break">...</span> <a href="#">11</a>, <a href="#">12</a>, <a href="#">Next</a>
+            </div>
+          </td>
+        </tr>
+      </table>
+
+      <table class="grid">
+        <tr>
+          <td class="toprow center" colspan="2">Thread</td>
+          <td class="toprow center foldable">Starter</td>
+          <td class="toprow center foldable">Replies</td>
+          <td class="toprow center foldable">Views</td>
+          <td class="toprow center">Last Post</td>
+        </tr>
+        <tr>
+          <td class="row1 iconcell">
+            <img class="forum-icon" src="../data/images/topic-hot.svg" alt="Hot topic icon">
+          </td>
+          <td class="row2 postbody">
+            <span class="smalltext"><b>Sticky:</b> <a class="topiclink" href="#post">Read me before posting</a></span>
+          </td>
+          <td class="row1 center foldable mediumtext">Moderator</td>
+          <td class="row2 center foldable mediumtext">18</td>
+          <td class="row1 center foldable mediumtext">4,402</td>
+          <td class="row2 right smalltext">Today, 08:20<br>by <a href="#" class="topiclink">IndexFan</a></td>
+        </tr>
+        <tr>
+          <td class="row1 iconcell">
+            <img class="forum-icon" src="../data/images/topic.svg" alt="Topic icon">
+          </td>
+          <td class="row2 postbody">
+            <span class="smalltext"><a class="topiclink" href="#post">How do you organize long threads?</a></span>
+          </td>
+          <td class="row1 center foldable mediumtext">PlainUser</td>
+          <td class="row2 center foldable mediumtext">7</td>
+          <td class="row1 center foldable mediumtext">352</td>
+          <td class="row2 right smalltext">Today, 07:42<br>by <a href="#" class="topiclink">GridLover</a></td>
+        </tr>
+        <tr>
+          <td class="row1 iconcell">
+            <img class="forum-icon" src="../data/images/topic-locked.svg" alt="Locked topic icon">
+          </td>
+          <td class="row2">
+            <span class="smalltext"><a class="topiclink" href="#post">Release announcement archive</a></span>
+          </td>
+          <td class="row1 center foldable mediumtext">Admin</td>
+          <td class="row2 center foldable mediumtext">0</td>
+          <td class="row1 center foldable mediumtext">1,103</td>
+          <td class="row2 right smalltext">Last week<br>by <a href="#" class="topiclink">Admin</a></td>
+        </tr>
+      </table>
+
+      <p class="legend smalltext">
+        <span class="legend-item"><img class="forum-icon" src="../data/images/topic.svg" alt="">Normal</span>
+        <span class="legend-item"><img class="forum-icon" src="../data/images/topic-hot.svg" alt="">Popular</span>
+        <span class="legend-item"><img class="forum-icon" src="../data/images/topic-locked.svg" alt="">Closed</span>
+      </p>
+      <table class="lineup">
+        <tr>
+          <td class="smalltext">
+            <div class="pagination">
+              <span class="label">Page</span><strong>1</strong> of <strong>12</strong>
+            </div>
+          </td>
+          <td class="right smalltext">
+            <div class="pagination">
+              <span class="label">Go to page</span>
+              <strong>1</strong>, <a href="#">2</a>, <a href="#">3</a>, <span class="pagination-break">...</span> <a href="#">11</a>, <a href="#">12</a>, <a href="#">Next</a>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </section>
+
+    <section id="post" class="section">
+      <table class="lineup">
+        <tr>
+          <td>
+            <span class="largetext"><b>Post View</b></span>
+            <span class="crumb smalltext">Main Discussion &gt; Example Topic</span>
+          </td>
+          <td class="right smalltext">Classic two-column author + content layout.</td>
+        </tr>
+        <tr>
+          <td class="smalltext">
+            <div class="pagination">
+              <span class="label">Page</span><strong>1</strong> of <strong>4</strong>
+            </div>
+          </td>
+          <td class="right smalltext">
+            <div class="pagination">
+              <span class="label">Go to page</span>
+              <strong>1</strong>, <a href="#">2</a>, <a href="#">3</a>, <a href="#">4</a>, <a href="#">Next</a>
+            </div>
+          </td>
+        </tr>
+      </table>
+
+      <table class="grid post-layout">
+        <tr>
+          <td class="toprow authorcol">Author</td>
+          <td class="toprow">Message</td>
+        </tr>
+        <tr>
+          <td class="row1 authorcol">
+            <span class="mediumtext"><b>PixelAssembler</b></span><br>
+            <span class="smalltext">Joined: 2006<br>Posts: 124</span>
+          </td>
+          <td class="row2">
+            <div class="postheader">
+              Posted: Today, 14:01&nbsp;&nbsp;Subject: Keeping threads easy to scan
+            </div>
+            <div class="postbody">
+              <p>
+                Short paragraphs, clear headings, and simple links make older forum layouts
+                feel fast and readable.
+              </p>
+              <p>
+                You can still keep the old style while adding responsive tweaks for smaller screens.
+              </p>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td class="row1 authorcol">
+            <span class="mediumtext"><b>TextModeUser</b></span><br>
+            <span class="smalltext">Joined: 2004<br>Posts: 922</span>
+          </td>
+          <td class="row2">
+            <div class="postheader">
+              Posted: Today, 14:33&nbsp;&nbsp;Subject: Re: Keeping threads easy to scan
+            </div>
+            <div class="postbody">
+              <div class="quote">
+                <div class="quotehead smalltext">Quoted:</div>
+                <blockquote class="quotebody smalltext">
+                  Keep spacing tight, typography consistent, and tables clean.
+                </blockquote>
+              </div>
+              <pre class="codeblock">; Compact post-style code block example
+mov eax, [threadCount]
+add eax, 1
+mov [threadCount], eax</pre>
+              <p class="smalltext">Useful link: <a class="postlink" href="#">forum readability checklist</a></p>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </section>
+
+    <section id="compose" class="section">
+      <table class="lineup">
+        <tr>
+          <td>
+            <span class="largetext"><b>Posting Form View</b></span>
+            <span class="crumb smalltext">Main Discussion &gt; New Topic</span>
+          </td>
+          <td class="right smalltext">Classic forum composer controls.</td>
+        </tr>
+      </table>
+      <table class="grid">
+        <tr>
+          <td class="toprow" colspan="2">Post A New Topic</td>
+        </tr>
+        <tr>
+          <td class="row1" style="width:170px;"><span class="mediumtext"><b>Author</b></span></td>
+          <td class="row2"><span class="mediumtext">Guest User</span></td>
+        </tr>
+        <tr>
+          <td class="row1"><span class="mediumtext"><b>Forum</b></span></td>
+          <td class="row2">
+            <form class="post-form" action="#" method="post">
+              <div class="form-row">
+                <label for="forum-select" class="smalltext">Select</label>
+                <select id="forum-select" name="forum">
+                  <option>Main Discussion</option>
+                  <option>Guides and Examples</option>
+                  <option>Projects</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label for="subject" class="smalltext">Subject</label>
+                <input id="subject" type="text" name="subject" value="Example new thread subject">
+              </div>
+              <div class="form-row">
+                <label for="message" class="smalltext">Message</label>
+                <textarea id="message" name="message">Write your post content here.
+
+Keep it short, readable, and easy to scan.</textarea>
+              </div>
+              <div class="form-row inline-options smalltext">
+                <label><input type="checkbox" name="notify" checked> Notify on replies</label>
+                <label><input type="checkbox" name="signature"> Attach signature</label>
+                <label><input type="checkbox" name="disable-smiles"> Disable smiles</label>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn">Preview</button>
+                <button type="submit" class="btn">Submit</button>
+                <button type="reset" class="btn">Reset</button>
+              </div>
+            </form>
+          </td>
+        </tr>
+      </table>
+    </section>
+
+    <section id="tokens" class="section">
+      <table class="lineup">
+        <tr>
+          <td><span class="largetext"><b>Style Tokens</b></span></td>
+          <td class="right smalltext">Reference swatches and sizing used above.</td>
+        </tr>
+      </table>
+      <table class="token-grid smalltext">
+        <tr class="toprow">
+          <th>Token</th>
+          <th>Sample</th>
+          <th>Value</th>
+        </tr>
+        <tr class="row1">
+          <td>Page Background</td>
+          <td><span class="swatch" style="background:#9090bb;"></span></td>
+          <td>#9090BB</td>
+        </tr>
+        <tr class="row2">
+          <td>Container Background</td>
+          <td><span class="swatch" style="background:#f8f8f8;"></span></td>
+          <td>#F8F8F8</td>
+        </tr>
+        <tr class="row1">
+          <td>Grid Border</td>
+          <td><span class="swatch" style="background:#707096;"></span></td>
+          <td>#707096</td>
+        </tr>
+        <tr class="row2">
+          <td>Header Row</td>
+          <td><span class="swatch" style="background:#9090bb;"></span></td>
+          <td>#9090BB</td>
+        </tr>
+        <tr class="row1">
+          <td>Category Row</td>
+          <td><span class="swatch" style="background:#7676a8;"></span></td>
+          <td>#7676A8</td>
+        </tr>
+      </table>
+      <p class="footer-note">
+        This page intentionally uses original placeholder text and simplified components while preserving the visual language.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

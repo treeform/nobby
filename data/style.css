@@ -1,0 +1,316 @@
+/* Distilled forum styling inspired by early 2000s boards. */
+:root {
+  --bg-page: #9090bb;
+  --bg-container: #f8f8f8;
+  --bg-row-1: #e8e8e8;
+  --bg-row-2: #f1f1f1;
+  --bg-head: #9090bb;
+  --bg-cat: #7676a8;
+  --border: #707096;
+  --text-main: #000020;
+  --text-soft: #eeeeff;
+  --text-cat: #fff788;
+  --link-hover: #e23e3e;
+  --post-link: #0000c0;
+}
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html {
+  scrollbar-gutter: stable;
+}
+body {
+  margin: 0;
+  background: var(--bg-page);
+  color: var(--text-main);
+  font-family: Verdana, Helvetica, Arial, sans-serif;
+  font-size: 11px;
+  line-height: 1.45;
+}
+a {
+  color: var(--text-main);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+a.postlink {
+  color: var(--post-link);
+}
+.page {
+  width: min(1320px, calc(100vw - 24px));
+  margin: 12px auto;
+  padding: 12px;
+  border: 1px solid #000;
+  background: var(--bg-container);
+}
+.smalltext {
+  font-size: 11px;
+}
+.mediumtext {
+  font-size: 12px;
+}
+.largetext {
+  font-size: 13px;
+}
+.maintitle {
+  margin: 0;
+  font: bold 26px/1.15 "Trebuchet MS", Verdana, Helvetica, sans-serif;
+  color: #000;
+}
+.subtitle {
+  margin: 2px 0 0;
+}
+.navigation {
+  margin: 10px 0 12px;
+}
+.navigation a {
+  padding: 0 4px;
+  font-weight: 700;
+}
+.section {
+  margin: 0 0 14px;
+}
+.section:last-child {
+  margin-bottom: 0;
+}
+table.grid,
+table.lineup {
+  width: 100%;
+  border-collapse: collapse;
+}
+table.grid,
+table.grid td,
+table.grid th {
+  border: 1px solid var(--border);
+}
+table.grid td,
+table.grid th {
+  padding: 4px;
+}
+table.lineup td {
+  padding: 2px;
+}
+.catrow {
+  background: var(--bg-cat);
+  color: var(--text-cat);
+  font-size: 13px;
+  font-weight: 700;
+}
+.toprow {
+  background: var(--bg-head);
+  color: var(--text-soft);
+  font-weight: 700;
+}
+.toprow a {
+  color: var(--text-soft);
+}
+.row1 {
+  background: var(--bg-row-1);
+}
+.row2 {
+  background: var(--bg-row-2);
+}
+.center {
+  text-align: center;
+}
+.right {
+  text-align: right;
+}
+.nowrap {
+  white-space: nowrap;
+}
+.iconcell {
+  width: 30px;
+  text-align: center;
+  vertical-align: middle;
+}
+.forum-icon {
+  width: 18px;
+  height: 18px;
+  image-rendering: pixelated;
+}
+.topiclink {
+  font-size: 13px;
+}
+.forumlink {
+  font-weight: 700;
+}
+.crumb {
+  display: inline-block;
+  margin-left: 8px;
+}
+.pagination {
+  margin: 6px 0;
+}
+.pagination .label {
+  margin-right: 6px;
+}
+.pagination a,
+.pagination strong {
+  display: inline-block;
+  padding: 0 3px;
+}
+.pagination strong {
+  font-weight: 700;
+}
+.pagination-break {
+  padding: 0 3px;
+}
+.post-layout {
+  width: 100%;
+  border-collapse: collapse;
+}
+.post-layout td {
+  vertical-align: top;
+}
+.authorcol {
+  width: 200px;
+}
+.post-layout .postbody {
+  width: 100%;
+}
+.postheader {
+  font-size: 13px;
+  margin: 0 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.postbody {
+  font-size: 13px;
+  word-wrap: break-word;
+}
+.postbody p {
+  margin: 0 0 10px;
+}
+.postbody p:last-child {
+  margin-bottom: 0;
+}
+.quote {
+  width: 95%;
+  margin: 12px auto;
+}
+.quotehead {
+  padding: 4px 2px;
+  font-size: 10px;
+}
+.quotebody {
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+.codeblock {
+  margin: 0;
+  padding: 4px;
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  background: #fff;
+  font: 13px "Courier New", Courier, monospace;
+}
+.legend {
+  margin-top: 8px;
+}
+.legend-item {
+  margin-right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.token-grid {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+}
+.token-grid td,
+.token-grid th {
+  border: 1px solid var(--border);
+  padding: 4px;
+}
+.swatch {
+  width: 22px;
+  height: 14px;
+  display: inline-block;
+  border: 1px solid #444;
+  vertical-align: middle;
+}
+.footer-note {
+  margin-top: 12px;
+  font-size: 11px;
+}
+.post-form {
+  margin-top: 4px;
+}
+.post-form .form-row {
+  margin-bottom: 6px;
+}
+.post-form .form-row:last-child {
+  margin-bottom: 0;
+}
+.post-form label {
+  display: inline-block;
+  min-width: 90px;
+}
+.post-form input[type="text"],
+.post-form select,
+.post-form textarea {
+  width: min(100%, 680px);
+  border: 1px solid var(--border);
+  background: #e4e4e4;
+  color: #000;
+  font: 11px Verdana, Helvetica, Arial, sans-serif;
+  padding: 3px 4px;
+}
+.post-form textarea {
+  min-height: 180px;
+  resize: vertical;
+}
+.post-form .inline-options label {
+  min-width: 0;
+  margin-right: 12px;
+}
+.post-form .inline-options input {
+  vertical-align: middle;
+  margin-right: 2px;
+}
+.form-actions {
+  margin-top: 6px;
+}
+.btn {
+  border: 1px solid var(--border);
+  background: #e4e4e4;
+  color: #000020;
+  font: 11px Verdana, Helvetica, Arial, sans-serif;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.btn:hover {
+  color: var(--link-hover);
+}
+@media (max-width: 900px) {
+  .authorcol {
+    width: 150px;
+  }
+  .foldable {
+    display: none;
+  }
+}
+@media (max-width: 680px) {
+  .page {
+    width: calc(100vw - 12px);
+    margin: 6px auto;
+    padding: 8px;
+  }
+  .authorcol {
+    width: 120px;
+  }
+  .post-form label {
+    display: block;
+    min-width: 0;
+    margin-bottom: 2px;
+  }
+}
