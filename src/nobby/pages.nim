@@ -1,5 +1,6 @@
 import
-  std/[strutils, times],
+  std/strutils,
+  chrono,
   taggy,
   models
 
@@ -28,7 +29,7 @@ proc esc(text: string): string =
 
 proc fmtEpoch(ts: int64): string =
   ## Formats Unix timestamp for page output.
-  fromUnix(ts).utc.format("yyyy-MM-dd HH:mm:ss 'UTC'")
+  Timestamp(ts.float64).format("{year/4}-{month/2}-{day/2} {hour/2}:{minute/2}:{second/2} UTC")
 
 proc sectionName(board: Board): string =
   ## Returns normalized section title for one board.
