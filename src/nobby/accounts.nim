@@ -65,51 +65,31 @@ proc initAccountsSchema*(pool: Pool) =
 
 proc getUserByUsername*(pool: Pool, username: string): AccountUser =
   ## Finds one user by username.
-  let rows = pool.query(
-    AccountUser,
-    "SELECT * FROM account_user WHERE username = ? LIMIT 1",
-    username
-  )
+  let rows = pool.filter(AccountUser, it.username == username)
   if rows.len > 0:
     return rows[0]
 
 proc getUserByEmail*(pool: Pool, email: string): AccountUser =
   ## Finds one user by email.
-  let rows = pool.query(
-    AccountUser,
-    "SELECT * FROM account_user WHERE email = ? LIMIT 1",
-    email
-  )
+  let rows = pool.filter(AccountUser, it.email == email)
   if rows.len > 0:
     return rows[0]
 
 proc getUserById*(pool: Pool, userId: int): AccountUser =
   ## Finds one user by id.
-  let rows = pool.query(
-    AccountUser,
-    "SELECT * FROM account_user WHERE id = ? LIMIT 1",
-    userId
-  )
+  let rows = pool.filter(AccountUser, it.id == userId)
   if rows.len > 0:
     return rows[0]
 
 proc getUserSessionByToken*(pool: Pool, token: string): UserSession =
   ## Finds one active session by token.
-  let rows = pool.query(
-    UserSession,
-    "SELECT * FROM user_session WHERE token = ? LIMIT 1",
-    token
-  )
+  let rows = pool.filter(UserSession, it.token == token)
   if rows.len > 0:
     return rows[0]
 
 proc getPasswordResetToken*(pool: Pool, token: string): PasswordResetToken =
   ## Finds one password reset token by token value.
-  let rows = pool.query(
-    PasswordResetToken,
-    "SELECT * FROM password_reset_token WHERE token = ? LIMIT 1",
-    token
-  )
+  let rows = pool.filter(PasswordResetToken, it.token == token)
   if rows.len > 0:
     return rows[0]
 

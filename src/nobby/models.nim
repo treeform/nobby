@@ -88,32 +88,19 @@ proc listBoards*(pool: Pool): seq[Board] =
 
 proc getBoardBySlug*(pool: Pool, slug: string): Board =
   ## Finds board by slug.
-  let boards = pool.query(
-    Board,
-    "SELECT * FROM board WHERE slug = ? LIMIT 1",
-    slug
-  )
+  let boards = pool.filter(Board, it.slug == slug)
   if boards.len > 0:
     return boards[0]
 
 proc getBoardById*(pool: Pool, boardId: int): Board =
   ## Finds board by numeric id.
-  let boards = pool.query(
-    Board,
-    "SELECT * FROM board WHERE id = ? LIMIT 1",
-    boardId
-  )
+  let boards = pool.filter(Board, it.id == boardId)
   if boards.len > 0:
     return boards[0]
 
 proc countTopicsByBoard*(pool: Pool, boardId: int): int =
   ## Counts topics in a board.
-  let rows = pool.query(
-    "SELECT COUNT(*) FROM topic WHERE board_id = ?",
-    boardId
-  )
-  if rows.len > 0 and rows[0].len > 0:
-    return rows[0][0].parseInt()
+  pool.filter(Topic, it.boardId == boardId).len
 proc countPostsByBoard*(pool: Pool, boardId: int): int =
   ## Counts all posts in all topics for one board.
   let rows = pool.query(
@@ -159,12 +146,7 @@ proc getTopicById*(pool: Pool, topicId: int): Topic =
 
 proc countPostsByTopic*(pool: Pool, topicId: int): int =
   ## Counts posts in a topic.
-  let rows = pool.query(
-    "SELECT COUNT(*) FROM post WHERE topic_id = ?",
-    topicId
-  )
-  if rows.len > 0 and rows[0].len > 0:
-    return rows[0][0].parseInt()
+  pool.filter(Post, it.topicId == topicId).len
 
 proc listPostsByTopic*(
   pool: Pool,
