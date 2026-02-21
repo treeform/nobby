@@ -234,6 +234,8 @@ proc renderBoardPage*(
 ): string =
   ## Renders topic listing for one board.
   let basePath = "/b/" & board.slug
+  let pagination = renderPagination(basePath, page, pages)
+  let newTopicForm = renderNewTopicForm(board)
   let content = renderFragment:
     section "#listing.section":
       p ".largetext":
@@ -241,7 +243,7 @@ proc renderBoardPage*(
           say esc(board.title)
       p ".meta":
         say esc(board.description)
-      say renderPagination(basePath, page, pages)
+      say pagination
       table ".grid":
         tr:
           td ".toprow center":
@@ -270,8 +272,8 @@ proc renderBoardPage*(
               say $row.replyCount
             td ".row1":
               say fmtEpoch(row.topic.updatedAt)
-      say renderPagination(basePath, page, pages)
-      say renderNewTopicForm(board)
+      say pagination
+      say newTopicForm
   renderLayout(board.title, content)
 
 proc renderReplyForm(topic: Topic): string =
@@ -314,6 +316,8 @@ proc renderTopicPage*(
 ): string =
   ## Renders topic and replies page.
   let basePath = "/t/" & $topic.id
+  let pagination = renderPagination(basePath, page, pages)
+  let replyForm = renderReplyForm(topic)
   let content = renderFragment:
     section "#post.section":
       p ".largetext":
@@ -321,7 +325,7 @@ proc renderTopicPage*(
           say esc(topic.title)
       p ".meta":
         say "Started by " & esc(topic.authorName) & " at " & fmtEpoch(topic.createdAt)
-      say renderPagination(basePath, page, pages)
+      say pagination
       table ".grid post-layout":
         tr:
           td ".toprow authorcol":
@@ -338,6 +342,6 @@ proc renderTopicPage*(
               say esc(post.body)
             td ".row1":
               say fmtEpoch(post.createdAt)
-      say renderPagination(basePath, page, pages)
-      say renderReplyForm(topic)
+      say pagination
+      say replyForm
   renderLayout(topic.title, content)
