@@ -4,7 +4,8 @@ import
   debby/[pools, sqlite],
   mummy,
   taggy,
-  models
+  models,
+  utils
 
 const
   DefaultPasswordIterations* = 120_000
@@ -19,6 +20,7 @@ type
     id*: int
     username*: string
     email*: string
+    isAdmin*: bool
     passwordSalt*: string
     passwordHash*: string
     passwordIterations*: int
@@ -40,11 +42,26 @@ type
     usedAt*: int64
     createdAt*: int64
 
+  UserStats* = object
+    username*: string
+    email*: string
+    isAdmin*: bool
+    threadCount*: int
+    postCount*: int
+
 proc initAccountsSchema*(pool: Pool) =
   ## Creates account-related tables and indexes if needed.
   pool.withDb:
     if not db.tableExists(AccountUser):
       db.createTable(AccountUser)
+    let userColumns = db.query("PRAGMA table_info(account_user)")
+    var hasIsAdmin = false
+    for userColumn in userColumns:
+      if userColumn.len > 1 and userColumn[1] == "is_admin":
+        hasIsAdmin = true
+        break
+    if not hasIsAdmin:
+      discard db.query("ALTER TABLE account_user ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
     db.checkTable(AccountUser)
     db.createIndexIfNotExists(AccountUser, "username")
     db.createIndexIfNotExists(AccountUser, "email")
@@ -99,6 +116,38 @@ proc getPasswordResetToken*(pool: Pool, token: string): PasswordResetToken =
   let rows = pool.filter(PasswordResetToken, it.token == token)
   if rows.len > 0:
     return rows[0]
+
+proc countUsers*(pool: Pool): int =
+  ## Returns total account count.
+  pool.filter(AccountUser).len
+
+proc parseDbBool(value: string): bool =
+  ## Parses SQLite bool-like values.
+  let cleaned = value.strip().toLowerAscii()
+  cleaned in ["1", "true", "yes"]
+
+proc listUserStats*(pool: Pool): seq[UserStats] =
+  ## Lists user account stats for profile leaderboard page.
+  let rows = pool.query(
+    "SELECT u.username, u.email, u.is_admin, " &
+      "COALESCE(t.thread_count, 0), COALESCE(p.post_count, 0) " &
+      "FROM account_user u " &
+      "LEFT JOIN (SELECT author_name, COUNT(*) AS thread_count FROM topic GROUP BY author_name) t " &
+      "ON t.author_name = u.username " &
+      "LEFT JOIN (SELECT author_name, COUNT(*) AS post_count FROM post GROUP BY author_name) p " &
+      "ON p.author_name = u.username " &
+      "ORDER BY COALESCE(p.post_count, 0) DESC, COALESCE(t.thread_count, 0) DESC, u.username ASC"
+  )
+  for row in rows:
+    if row.len < 5:
+      continue
+    result.add(UserStats(
+      username: row[0],
+      email: row[1],
+      isAdmin: parseDbBool(row[2]),
+      threadCount: row[3].parseInt(),
+      postCount: row[4].parseInt()
+    ))
 
 proc ensureRandom() =
   ## Initializes thread-local random source once.
@@ -331,17 +380,11 @@ proc setUserPassword*(
   user.updatedAt = nowEpoch()
   pool.update(user)
 
-proc esc(text: string): string =
-  ## Escapes HTML special characters.
-  result = text
-  result = result.replace("&", "&amp;")
-  result = result.replace("<", "&lt;")
-  result = result.replace(">", "&gt;")
-  result = result.replace("\"", "&quot;")
-
 proc renderAccountLayout*(
   pageTitle: string,
-  content: string
+  content: string,
+  currentUsername = "",
+  isAdmin = false
 ): string =
   ## Renders shared account page shell.
   render:
@@ -363,29 +406,58 @@ proc renderAccountLayout*(
                 p ".smalltext":
                   say "Visual forum inspired by the early 2000s message boards."
               td ".right.smalltext account-cell":
-                a:
-                  href "/login"
-                  say "Login"
-                say " | "
-                a:
-                  href "/register"
-                  say "Register"
+                if currentUsername.len == 0:
+                  a:
+                    href "/login"
+                    say "Login"
+                  say " | "
+                  a:
+                    href "/register"
+                    say "Register"
+                else:
+                  say "User: "
+                  b:
+                    say esc(currentUsername)
+                  if isAdmin:
+                    say " | "
+                    a:
+                      href "/users"
+                      say "Users"
+                  say " | "
+                  a:
+                    href "/logout"
+                    say "Logout"
           p ".navigation":
             a:
               href "/"
               say "Index"
-            a:
-              href "/register"
-              say "Register"
-            a:
-              href "/login"
-              say "Login"
-            a:
-              href "/forgot-password"
-              say "Forgot Password"
-            a:
-              href "/forgot-username"
-              say "Forgot Username"
+            if currentUsername.len == 0:
+              say " | "
+              a:
+                href "/register"
+                say "Register"
+              say " | "
+              a:
+                href "/login"
+                say "Login"
+              say " | "
+              a:
+                href "/forgot-password"
+                say "Forgot Password"
+              say " | "
+              a:
+                href "/forgot-username"
+                say "Forgot Username"
+            else:
+              if isAdmin:
+                say " | "
+                a:
+                  href "/users"
+                  say "Users"
+              say " | "
+              a:
+                href "/logout"
+                say "Logout"
           say content
           p ".footer-note":
             say "Copyright 2026 Nobby. MIT License."
@@ -632,3 +704,59 @@ proc renderForgotUsernamePage*(
                   ttype "submit"
                   say "Send username reminder"
   renderAccountLayout("Forgot Username", content)
+
+proc renderUsersPage*(
+  rows: seq[UserStats],
+  showEmails: bool,
+  currentUsername = "",
+  isAdmin = false,
+  currentPage = 1,
+  pageCount = 1
+): string =
+  ## Renders account statistics listing page.
+  let pagination = renderPagination("/users", currentPage, pageCount)
+  let content = renderFragment:
+    section "#post.section":
+      say pagination
+      table ".grid post-layout":
+        tr:
+          td ".toprow authorcol":
+            say "Username"
+          if showEmails:
+            td ".toprow":
+              say "Email"
+          td ".toprow":
+            say "Threads"
+          td ".toprow":
+            say "Posts"
+        if rows.len == 0:
+          tr:
+            td ".row1":
+              if showEmails:
+                colspan "4"
+              else:
+                colspan "3"
+              say "No users found."
+        for row in rows:
+          tr:
+            td ".row1 authorcol":
+              if row.isAdmin:
+                b:
+                  say row.username & " (admin)"
+              else:
+                say row.username
+            if showEmails:
+              td ".row2":
+                say row.email
+            td ".row1":
+              say $row.threadCount
+            td ".row2":
+              say $row.postCount
+      say pagination
+  renderLayout(
+    "Users",
+    content,
+    currentUsername,
+    @[("Index", "/"), ("Users", "")],
+    isAdmin
+  )

@@ -225,6 +225,7 @@ proc indexHandler(request: Request) {.gcsafe.} =
   ## Handles board index route.
   try:
     let currentUser = pool.getCurrentUser(request)
+    let currentUsername = if currentUser.isNil: "" else: currentUser.username
     var rows: seq[BoardRow]
     for board in pool.listBoards():
       rows.add(BoardRow(
@@ -233,7 +234,7 @@ proc indexHandler(request: Request) {.gcsafe.} =
         postCount: pool.countPostsByBoard(board.id),
         lastPost: pool.getLastPostByBoard(board.id)
       ))
-    let body = renderBoardIndex(rows, if currentUser.isNil: "" else: currentUser.username)
+    let body = renderBoardIndex(rows, pool.countUsers(), currentUsername)
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("indexHandler", request, e)
@@ -559,6 +560,36 @@ proc forgotUsernameSubmitHandler(request: Request) {.gcsafe.} =
     logHandlerException("forgotUsernameSubmitHandler", request, e)
     request.respondInternalError()
 
+proc usersPageHandler(request: Request) {.gcsafe.} =
+  ## Handles users page GET.
+  try:
+    let
+      currentUser = pool.getCurrentUser(request)
+      currentUsername = if currentUser.isNil: "" else: currentUser.username
+      isAdmin = not currentUser.isNil and currentUser.isAdmin
+      requestedPage = pageFromUri(request.uri)
+      allRows = pool.listUserStats()
+      pageCount = totalPages(allRows.len, PageSize)
+    var
+      page = requestedPage
+      startAt = 0
+      endAt = 0
+      rows: seq[UserStats]
+    if page > pageCount:
+      page = pageCount
+    startAt = (page - 1) * PageSize
+    endAt = startAt + PageSize
+    if endAt > allRows.len:
+      endAt = allRows.len
+    if startAt < endAt:
+      for i in startAt ..< endAt:
+        rows.add(allRows[i])
+    let body = renderUsersPage(rows, isAdmin, currentUsername, isAdmin, page, pageCount)
+    request.respondHtml(200, body)
+  except Exception as e:
+    logHandlerException("usersPageHandler", request, e)
+    request.respondInternalError()
+
 var router: Router
 router.get("/style.css", respondCss)
 router.get("/images/@name", respondImage)
@@ -576,6 +607,7 @@ router.get("/reset-password", resetPasswordPageHandler)
 router.post("/reset-password", resetPasswordSubmitHandler)
 router.get("/forgot-username", forgotUsernamePageHandler)
 router.post("/forgot-username", forgotUsernameSubmitHandler)
+router.get("/users", usersPageHandler)
 router.get("/b/@slug", boardHandler)
 router.get("/t/@id", topicHandler)
 router.post("/b/@slug/new", newTopicHandler)

@@ -157,6 +157,7 @@ proc main() =
   doAssert "Posts" in indexHtml, "Index posts column missing."
   doAssert "Last Post" in indexHtml, "Index last-post column missing."
   doAssert "General Discussions" in indexHtml, "Index section header missing."
+  doAssert "Users:" in indexHtml, "Index users stat missing."
 
   let boardPath = firstHrefPath(indexHtml, "/b/")
   doAssert boardPath.len > 0, "Could not find a board link on index page."
@@ -218,6 +219,18 @@ proc main() =
   doAssert sessionCookie.startsWith("nobby_session="), "Login did not return session cookie."
   var authHeaders: HttpHeaders
   authHeaders["Cookie"] = sessionCookie
+
+  echo "Testing users page email visibility rules."
+  let usersAsGuest = curl.get(BaseUrl & "/users").body
+  doAssert accountName in usersAsGuest, "Users page should list registered accounts."
+  doAssert accountEmail notin usersAsGuest, "Guest users should not see account emails."
+  doAssert "Index" in usersAsGuest and "Users" in usersAsGuest and " > " in usersAsGuest,
+    "Users page should show breadcrumb."
+  doAssert "Page" in usersAsGuest and "of" in usersAsGuest, "Users page should render pagination summary."
+  accountDbPool.withDb:
+    discard db.query("UPDATE account_user SET is_admin = 1 WHERE username = ?", accountName)
+  let usersAsAdmin = curl.get(BaseUrl & "/users", authHeaders).body
+  doAssert accountEmail in usersAsAdmin, "Admin users should see account emails."
 
   echo "Testing topic creation."
   let createdTitle = "E2E topic title"

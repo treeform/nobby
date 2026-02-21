@@ -90,8 +90,13 @@ proc seedPostingAccounts(pool: Pool, seeds: seq[SeedBoard], serverSecret: string
           authors.incl(replySeed.author)
   for author in authors.items:
     pool.ensureAccount(serverSecret, author)
-  if pool.getUserByUsername("Admin").isNil:
-    discard pool.createUser(serverSecret, "Admin", "admin@examle.com", "hunter2")
+  var admin = pool.getUserByUsername("Admin")
+  if admin.isNil:
+    admin = pool.createUser(serverSecret, "Admin", "admin@examle.com", "hunter2")
+  if not admin.isNil and not admin.isAdmin:
+    admin.isAdmin = true
+    admin.updatedAt = models.nowEpoch()
+    pool.update(admin)
 
 proc makeSeeds(): seq[SeedBoard] =
   ## Builds all space-themed boards, topics, and replies.
