@@ -7,6 +7,7 @@ import
 const
   AppTitle* = "Nobby, a bulletin board style forum"
   AppTagline* = "Visual forum inspired by the early 2000s message boards."
+  AppFooter* = "Copyright 2026 Nobby. MIT License."
 
 type
   BoardRow* = object
@@ -111,7 +112,7 @@ proc renderLayout(
           say breadcrumbHtml
           say content
           p ".footer-note":
-            say AppTagline
+            say AppFooter
 
 proc renderErrorPage*(statusCode: int, message: string, currentUsername = ""): string =
   ## Renders basic error page.

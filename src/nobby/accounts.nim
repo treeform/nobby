@@ -370,7 +370,7 @@ proc renderAccountLayout*(
               say "Forgot Username"
           say content
           p ".footer-note":
-            say "Visual forum inspired by the early 2000s message boards."
+            say "Copyright 2026 Nobby. MIT License."
 
 proc renderAccountMessage*(
   title: string,
