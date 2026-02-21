@@ -96,6 +96,16 @@ proc getBoardBySlug*(pool: Pool, slug: string): Board =
   if boards.len > 0:
     return boards[0]
 
+proc getBoardById*(pool: Pool, boardId: int): Board =
+  ## Finds board by numeric id.
+  let boards = pool.query(
+    Board,
+    "SELECT * FROM board WHERE id = ? LIMIT 1",
+    boardId
+  )
+  if boards.len > 0:
+    return boards[0]
+
 proc countTopicsByBoard*(pool: Pool, boardId: int): int =
   ## Counts topics in a board.
   let rows = pool.query(

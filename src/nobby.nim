@@ -1,8 +1,8 @@
 import
-  std/strutils,
+  std/[os, strutils],
   webby,
   mummy, mummy/routers,
-  nobby/[models, pages]
+  nobby/[accounts, models, pages]
 const
   PageSize = 20
   ForumCss = staticRead("../data/style.css")
@@ -20,6 +20,10 @@ proc parsePositiveInt(value: string): int =
       result = 0
   except:
     result = 0
+
+proc serverSecret(): string =
+  ## Loads server password pepper from environment.
+  getEnv("NOBBY_SERVER_SECRET", "nobby-dev-secret-change-me")
 
 proc pageFromUri(rawUri: string): int =
   ## Reads optional page query from URI using webby parser.
@@ -130,6 +134,10 @@ proc logHttpResponse(request: Request, statusCode: int) =
   request.logHttpAccess(statusCode)
   request.logHttpError(statusCode)
 
+proc logValidationFailure(routeName: string, request: Request, reason: string) =
+  ## Logs non-exception validation rejections with context.
+  stderr.writeLine("[validation] route=", routeName, " uri=", request.uri, " reason=", reason)
+
 proc logHandlerException(routeName: string, request: Request, e: ref Exception) =
   ## Logs a handler exception with stack trace.
   stderr.writeLine("[exception] route=", routeName, " uri=", request.uri)
@@ -141,10 +149,32 @@ proc respondHtml(request: Request, statusCode: int, body: string) =
   request.logHttpResponse(statusCode)
   request.respond(statusCode, htmlHeaders(), body)
 
+proc respondErrorPage(
+  request: Request,
+  routeName: string,
+  statusCode: int,
+  message: string,
+  currentUsername = ""
+) =
+  ## Logs and returns a rendered error page for all expected failures.
+  logValidationFailure(routeName, request, message)
+  var body = ""
+  {.cast(gcsafe).}:
+    body = renderErrorPage(statusCode, message, currentUsername)
+  request.respondHtml(statusCode, body)
+
 proc respondRedirect(request: Request, location: string) =
   ## Sends a simple redirect response.
   var headers = htmlHeaders()
   headers["Location"] = location
+  request.logHttpResponse(302)
+  request.respond(302, headers, "")
+
+proc respondRedirectWithCookie(request: Request, location: string, setCookie: string) =
+  ## Sends redirect and one Set-Cookie header.
+  var headers = htmlHeaders()
+  headers["Location"] = location
+  headers["Set-Cookie"] = setCookie
   request.logHttpResponse(302)
   request.respond(302, headers, "")
 
@@ -190,11 +220,13 @@ proc quitHandler(request: Request) {.gcsafe.} =
   quit(0)
 let pool = newForumPool("forum.db", 10)
 pool.initSchema()
+pool.initAccountsSchema()
 pool.seedDefaultBoard()
 
 proc indexHandler(request: Request) {.gcsafe.} =
   ## Handles board index route.
   try:
+    let currentUser = pool.getCurrentUser(request)
     var rows: seq[BoardRow]
     for board in pool.listBoards():
       rows.add(BoardRow(
@@ -205,7 +237,7 @@ proc indexHandler(request: Request) {.gcsafe.} =
       ))
     var body = ""
     {.cast(gcsafe).}:
-      body = renderBoardIndex(rows)
+      body = renderBoardIndex(rows, if currentUser.isNil: "" else: currentUser.username)
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("indexHandler", request, e)
@@ -214,12 +246,15 @@ proc indexHandler(request: Request) {.gcsafe.} =
 proc boardHandler(request: Request) {.gcsafe.} =
   ## Handles board listing route.
   try:
+    let currentUser = pool.getCurrentUser(request)
     let board = pool.getBoardBySlug(request.pathParams["slug"])
     if board.isNil:
-      var missingBoard = ""
-      {.cast(gcsafe).}:
-        missingBoard = renderErrorPage(404, "Board not found.")
-      request.respondHtml(404, missingBoard)
+      request.respondErrorPage(
+        "boardHandler",
+        404,
+        "Board not found.",
+        if currentUser.isNil: "" else: currentUser.username
+      )
       return
     let page = pageFromUri(request.uri)
     let topicCount = pool.countTopicsByBoard(board.id)
@@ -230,7 +265,7 @@ proc boardHandler(request: Request) {.gcsafe.} =
       rows.add(TopicRow(topic: topic, replyCount: replies))
     var body = ""
     {.cast(gcsafe).}:
-      body = renderBoardPage(board, rows, page, pages)
+      body = renderBoardPage(board, rows, page, pages, if currentUser.isNil: "" else: currentUser.username)
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("boardHandler", request, e)
@@ -239,27 +274,41 @@ proc boardHandler(request: Request) {.gcsafe.} =
 proc topicHandler(request: Request) {.gcsafe.} =
   ## Handles topic page route.
   try:
+    let currentUser = pool.getCurrentUser(request)
     let topicId = parsePositiveInt(request.pathParams["id"])
     if topicId == 0:
-      var badTopicId = ""
-      {.cast(gcsafe).}:
-        badTopicId = renderErrorPage(400, "Bad topic id.")
-      request.respondHtml(400, badTopicId)
+      request.respondErrorPage(
+        "topicHandler",
+        400,
+        "Bad topic id.",
+        if currentUser.isNil: "" else: currentUser.username
+      )
       return
     let topic = pool.getTopicById(topicId)
     if topic.isNil:
-      var missingTopic = ""
-      {.cast(gcsafe).}:
-        missingTopic = renderErrorPage(404, "Topic not found.")
-      request.respondHtml(404, missingTopic)
+      request.respondErrorPage(
+        "topicHandler",
+        404,
+        "Topic not found.",
+        if currentUser.isNil: "" else: currentUser.username
+      )
       return
     let page = pageFromUri(request.uri)
     let postCount = pool.countPostsByTopic(topic.id)
     let pages = totalPages(postCount, PageSize)
     let posts = pool.listPostsByTopic(topic.id, page, PageSize)
+    let board = pool.getBoardById(topic.boardId)
     var body = ""
     {.cast(gcsafe).}:
-      body = renderTopicPage(topic, posts, page, pages)
+      body = renderTopicPage(
+        topic,
+        posts,
+        page,
+        pages,
+        if currentUser.isNil: "" else: currentUser.username,
+        if board.isNil: "" else: board.title,
+        if board.isNil: "" else: board.slug
+      )
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("topicHandler", request, e)
@@ -269,28 +318,31 @@ proc newTopicHandler(request: Request) {.gcsafe.} =
   ## Handles create-topic form submission.
   try:
     let board = pool.getBoardBySlug(request.pathParams["slug"])
+    let currentUser = pool.getCurrentUser(request)
     if board.isNil:
-      var missingBoard = ""
-      {.cast(gcsafe).}:
-        missingBoard = renderErrorPage(404, "Board not found.")
-      request.respondHtml(404, missingBoard)
+      request.respondErrorPage(
+        "newTopicHandler",
+        404,
+        "Board not found.",
+        if currentUser.isNil: "" else: currentUser.username
+      )
+      return
+    if currentUser.isNil:
+      request.respondErrorPage("newTopicHandler", 401, "You must be logged in to post.")
       return
     let form = request.parseFormBody()
-    let author = cleanAuthor(form.formValue("author"))
+    let author = currentUser.username
     let title = cleanTitle(form.formValue("title"))
     let body = cleanBody(form.formValue("body"))
     if title.len == 0 or body.len == 0:
-      var invalidTopic = ""
-      {.cast(gcsafe).}:
-        invalidTopic = renderErrorPage(400, "Title and message are required.")
-      request.respondHtml(400, invalidTopic)
+      request.respondErrorPage("newTopicHandler", 400, "Title and message are required.")
       return
     let topic = pool.createTopicWithFirstPost(
       board.id,
       title,
       author,
       body,
-      nowEpoch()
+      models.nowEpoch()
     )
     request.respondRedirect("/t/" & $topic.id)
   except Exception as e:
@@ -300,32 +352,249 @@ proc newTopicHandler(request: Request) {.gcsafe.} =
 proc replyHandler(request: Request) {.gcsafe.} =
   ## Handles create-reply form submission.
   try:
+    let currentUser = pool.getCurrentUser(request)
     let topicId = parsePositiveInt(request.pathParams["id"])
     if topicId == 0:
-      var badTopicId = ""
-      {.cast(gcsafe).}:
-        badTopicId = renderErrorPage(400, "Bad topic id.")
-      request.respondHtml(400, badTopicId)
+      request.respondErrorPage(
+        "replyHandler",
+        400,
+        "Bad topic id.",
+        if currentUser.isNil: "" else: currentUser.username
+      )
       return
     if pool.getTopicById(topicId).isNil:
-      var missingTopic = ""
-      {.cast(gcsafe).}:
-        missingTopic = renderErrorPage(404, "Topic not found.")
-      request.respondHtml(404, missingTopic)
+      request.respondErrorPage(
+        "replyHandler",
+        404,
+        "Topic not found.",
+        if currentUser.isNil: "" else: currentUser.username
+      )
+      return
+    if currentUser.isNil:
+      request.respondErrorPage("replyHandler", 401, "You must be logged in to post.")
       return
     let form = request.parseFormBody()
-    let author = cleanAuthor(form.formValue("author"))
+    let author = currentUser.username
     let body = cleanBody(form.formValue("body"))
     if body.len == 0:
-      var invalidReply = ""
-      {.cast(gcsafe).}:
-        invalidReply = renderErrorPage(400, "Reply message is required.")
-      request.respondHtml(400, invalidReply)
+      request.respondErrorPage("replyHandler", 400, "Reply message is required.")
       return
-    discard pool.createReply(topicId, author, body, nowEpoch())
+    discard pool.createReply(topicId, author, body, models.nowEpoch())
     request.respondRedirect("/t/" & $topicId)
   except Exception as e:
     logHandlerException("replyHandler", request, e)
+    request.respondInternalError()
+
+proc registerPageHandler(request: Request) {.gcsafe.} =
+  ## Handles register page GET.
+  try:
+    var body = ""
+    {.cast(gcsafe).}:
+      body = renderRegisterPage()
+    request.respondHtml(200, body)
+  except Exception as e:
+    logHandlerException("registerPageHandler", request, e)
+    request.respondInternalError()
+
+proc registerSubmitHandler(request: Request) {.gcsafe.} =
+  ## Handles register page POST.
+  try:
+    let form = request.parseFormBody()
+    let username = cleanUsername(form.formValue("username"))
+    let email = cleanEmail(form.formValue("email"))
+    let password = form.formValue("password")
+    let repeatPassword = form.formValue("repeatPassword")
+    if username.len < 3 or email.len < 3 or password.len < 6:
+      logValidationFailure("registerSubmitHandler", request, "username/email/password are too short")
+      var invalidForm = ""
+      {.cast(gcsafe).}:
+        invalidForm = renderRegisterPage("Username/email/password are too short.", username, email)
+      request.respondHtml(400, invalidForm)
+      return
+    if password != repeatPassword:
+      logValidationFailure("registerSubmitHandler", request, "passwords do not match")
+      var mismatch = ""
+      {.cast(gcsafe).}:
+        mismatch = renderRegisterPage("Passwords do not match.", username, email)
+      request.respondHtml(400, mismatch)
+      return
+    if not pool.getUserByUsername(username).isNil:
+      logValidationFailure("registerSubmitHandler", request, "username is already taken")
+      var duplicateName = ""
+      {.cast(gcsafe).}:
+        duplicateName = renderRegisterPage("Username is already taken.", username, email)
+      request.respondHtml(400, duplicateName)
+      return
+    if not pool.getUserByEmail(email).isNil:
+      logValidationFailure("registerSubmitHandler", request, "email is already registered")
+      var duplicateEmail = ""
+      {.cast(gcsafe).}:
+        duplicateEmail = renderRegisterPage("Email is already registered.", username, email)
+      request.respondHtml(400, duplicateEmail)
+      return
+    let user = pool.createUser(serverSecret(), username, email, password)
+    let session = pool.createSession(user.id)
+    request.respondRedirectWithCookie("/", makeSessionSetCookie(session.token))
+  except Exception as e:
+    logHandlerException("registerSubmitHandler", request, e)
+    request.respondInternalError()
+
+proc loginPageHandler(request: Request) {.gcsafe.} =
+  ## Handles login page GET.
+  try:
+    var body = ""
+    {.cast(gcsafe).}:
+      body = renderLoginPage()
+    request.respondHtml(200, body)
+  except Exception as e:
+    logHandlerException("loginPageHandler", request, e)
+    request.respondInternalError()
+
+proc loginSubmitHandler(request: Request) {.gcsafe.} =
+  ## Handles login page POST.
+  try:
+    let form = request.parseFormBody()
+    let username = cleanUsername(form.formValue("username"))
+    let password = form.formValue("password")
+    let user = pool.authenticateUser(serverSecret(), username, password)
+    if user.isNil:
+      logValidationFailure("loginSubmitHandler", request, "invalid username or password")
+      var badLogin = ""
+      {.cast(gcsafe).}:
+        badLogin = renderLoginPage("Invalid username or password.", username)
+      request.respondHtml(401, badLogin)
+      return
+    let session = pool.createSession(user.id)
+    request.respondRedirectWithCookie("/", makeSessionSetCookie(session.token))
+  except Exception as e:
+    logHandlerException("loginSubmitHandler", request, e)
+    request.respondInternalError()
+
+proc logoutHandler(request: Request) {.gcsafe.} =
+  ## Handles logout POST.
+  try:
+    let token = request.sessionCookieValue()
+    pool.clearSession(token)
+    request.respondRedirectWithCookie("/", makeClearSessionCookie())
+  except Exception as e:
+    logHandlerException("logoutHandler", request, e)
+    request.respondInternalError()
+
+proc forgotPasswordPageHandler(request: Request) {.gcsafe.} =
+  ## Handles forgot-password page GET.
+  try:
+    var body = ""
+    {.cast(gcsafe).}:
+      body = renderForgotPasswordPage()
+    request.respondHtml(200, body)
+  except Exception as e:
+    logHandlerException("forgotPasswordPageHandler", request, e)
+    request.respondInternalError()
+
+proc forgotPasswordSubmitHandler(request: Request) {.gcsafe.} =
+  ## Handles forgot-password page POST.
+  try:
+    let form = request.parseFormBody()
+    let email = cleanEmail(form.formValue("email"))
+    let user = pool.getUserByEmail(email)
+    if not user.isNil:
+      let reset = pool.createPasswordResetToken(user.id)
+      stderr.writeLine("[mail] To: ", user.email)
+      stderr.writeLine("[mail] Subject: Reset your Nobby password")
+      stderr.writeLine("[mail] Body: Visit http://localhost:8080/reset-password?token=", reset.token)
+    var body = ""
+    {.cast(gcsafe).}:
+      body = renderForgotPasswordPage(
+        "If that email exists, a reset message was sent.",
+        email
+      )
+    request.respondHtml(200, body)
+  except Exception as e:
+    logHandlerException("forgotPasswordSubmitHandler", request, e)
+    request.respondInternalError()
+
+proc resetPasswordPageHandler(request: Request) {.gcsafe.} =
+  ## Handles reset-password page GET.
+  try:
+    let token = parseUrl(request.uri).query["token"]
+    var body = ""
+    {.cast(gcsafe).}:
+      body = renderResetPasswordPage(token)
+    request.respondHtml(200, body)
+  except Exception as e:
+    logHandlerException("resetPasswordPageHandler", request, e)
+    request.respondInternalError()
+
+proc resetPasswordSubmitHandler(request: Request) {.gcsafe.} =
+  ## Handles reset-password page POST.
+  try:
+    let form = request.parseFormBody()
+    let token = form.formValue("token")
+    let password = form.formValue("password")
+    let repeatPassword = form.formValue("repeatPassword")
+    if password.len < 6:
+      logValidationFailure("resetPasswordSubmitHandler", request, "password is too short")
+      var weak = ""
+      {.cast(gcsafe).}:
+        weak = renderResetPasswordPage(token, "Password is too short.")
+      request.respondHtml(400, weak)
+      return
+    if password != repeatPassword:
+      logValidationFailure("resetPasswordSubmitHandler", request, "passwords do not match")
+      var mismatch = ""
+      {.cast(gcsafe).}:
+        mismatch = renderResetPasswordPage(token, "Passwords do not match.")
+      request.respondHtml(400, mismatch)
+      return
+    let reset = pool.consumePasswordResetToken(token)
+    if reset.isNil:
+      logValidationFailure("resetPasswordSubmitHandler", request, "reset token is invalid or expired")
+      var invalidToken = ""
+      {.cast(gcsafe).}:
+        invalidToken = renderResetPasswordPage(token, "Reset token is invalid or expired.")
+      request.respondHtml(400, invalidToken)
+      return
+    let user = pool.getUserById(reset.userId)
+    if user.isNil:
+      request.respondErrorPage("resetPasswordSubmitHandler", 404, "Account was not found.")
+      return
+    pool.setUserPassword(serverSecret(), user, password)
+    let session = pool.createSession(user.id)
+    request.respondRedirectWithCookie("/", makeSessionSetCookie(session.token))
+  except Exception as e:
+    logHandlerException("resetPasswordSubmitHandler", request, e)
+    request.respondInternalError()
+
+proc forgotUsernamePageHandler(request: Request) {.gcsafe.} =
+  ## Handles forgot-username page GET.
+  try:
+    var body = ""
+    {.cast(gcsafe).}:
+      body = renderForgotUsernamePage()
+    request.respondHtml(200, body)
+  except Exception as e:
+    logHandlerException("forgotUsernamePageHandler", request, e)
+    request.respondInternalError()
+
+proc forgotUsernameSubmitHandler(request: Request) {.gcsafe.} =
+  ## Handles forgot-username page POST.
+  try:
+    let form = request.parseFormBody()
+    let email = cleanEmail(form.formValue("email"))
+    let user = pool.getUserByEmail(email)
+    if not user.isNil:
+      stderr.writeLine("[mail] To: ", user.email)
+      stderr.writeLine("[mail] Subject: Your Nobby username")
+      stderr.writeLine("[mail] Body: Your username is ", user.username)
+    var body = ""
+    {.cast(gcsafe).}:
+      body = renderForgotUsernamePage(
+        "If that email exists, a username reminder was sent.",
+        email
+      )
+    request.respondHtml(200, body)
+  except Exception as e:
+    logHandlerException("forgotUsernameSubmitHandler", request, e)
     request.respondInternalError()
 
 var router: Router
@@ -333,16 +602,30 @@ router.get("/style.css", respondCss)
 router.get("/images/@name", respondImage)
 router.get("/quit", quitHandler)
 router.get("/", indexHandler)
+router.get("/register", registerPageHandler)
+router.post("/register", registerSubmitHandler)
+router.get("/login", loginPageHandler)
+router.post("/login", loginSubmitHandler)
+router.post("/logout", logoutHandler)
+router.get("/forgot-password", forgotPasswordPageHandler)
+router.post("/forgot-password", forgotPasswordSubmitHandler)
+router.get("/reset-password", resetPasswordPageHandler)
+router.post("/reset-password", resetPasswordSubmitHandler)
+router.get("/forgot-username", forgotUsernamePageHandler)
+router.post("/forgot-username", forgotUsernameSubmitHandler)
 router.get("/b/@slug", boardHandler)
 router.get("/t/@id", topicHandler)
 router.post("/b/@slug/new", newTopicHandler)
 router.post("/t/@id/reply", replyHandler)
 
 router.notFoundHandler = proc(request: Request) {.gcsafe.} =
-  var missingPage = ""
-  {.cast(gcsafe).}:
-    missingPage = renderErrorPage(404, "Page not found.")
-  request.respondHtml(404, missingPage)
+  let currentUser = pool.getCurrentUser(request)
+  request.respondErrorPage(
+    "notFoundHandler",
+    404,
+    "Page not found.",
+    if currentUser.isNil: "" else: currentUser.username
+  )
 
 let server = newServer(router)
 echo "Serving forum on http://localhost:8080"

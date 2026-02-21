@@ -60,8 +60,28 @@ proc renderPagination(basePath: string, page: int, pages: int): string =
                 href basePath & "?page=" & $i
                 say $i
 
-proc renderLayout(pageTitle: string, content: string): string =
+proc renderBreadcrumb(pathItems: seq[(string, string)]): string =
+  ## Renders breadcrumb links for page navigation.
+  renderFragment:
+    p ".navigation":
+      for i, (title, hrefValue) in pathItems:
+        if hrefValue.len > 0:
+          a:
+            href hrefValue
+            say esc(title)
+        else:
+          say esc(title)
+        if i < pathItems.high:
+          say " > "
+
+proc renderLayout(
+  pageTitle: string,
+  content: string,
+  currentUsername = "",
+  breadcrumb: seq[(string, string)] = @[]
+): string =
   ## Renders page shell and shared navigation.
+  let breadcrumbHtml = renderBreadcrumb(breadcrumb)
   render:
     html:
       head:
@@ -73,28 +93,27 @@ proc renderLayout(pageTitle: string, content: string): string =
       body:
         tdiv ".page":
           p ".smalltext":
+            if currentUsername.len == 0:
+              a:
+                href "/login"
+                say "Login"
+              say " | "
+              a:
+                href "/register"
+                say "Register"
+            else:
+              say "User: " & esc(currentUsername)
+          p ".smalltext":
             span ".maintitle":
               say AppTitle
           p ".smalltext":
             say AppTagline
-          p ".navigation":
-            a:
-              href "/"
-              say "Index"
-            a:
-              href "#listing"
-              say "Listing"
-            a:
-              href "#post"
-              say "Post"
-            a:
-              href "#compose"
-              say "Posting Form"
+          say breadcrumbHtml
           say content
           p ".footer-note":
             say AppTagline
 
-proc renderErrorPage*(statusCode: int, message: string): string =
+proc renderErrorPage*(statusCode: int, message: string, currentUsername = ""): string =
   ## Renders basic error page.
   let content = renderFragment:
     table ".grid":
@@ -109,9 +128,9 @@ proc renderErrorPage*(statusCode: int, message: string): string =
             a:
               href "/"
               say "Back to boards"
-  renderLayout("Error", content)
+  renderLayout("Error", content, currentUsername, @[("Index", "/"), ("Error", "")])
 
-proc renderBoardIndex*(rows: seq[BoardRow]): string =
+proc renderBoardIndex*(rows: seq[BoardRow], currentUsername = ""): string =
   ## Renders board index page.
   type
     SectionGroup = object
@@ -186,7 +205,7 @@ proc renderBoardIndex*(rows: seq[BoardRow]): string =
                     say esc(row.lastPost.authorName)
                 else:
                   say "No posts yet"
-  renderLayout("Index", content)
+  renderLayout("Index", content, currentUsername, @[("Index", "")])
 
 proc renderNewTopicForm(board: Board): string =
   ## Renders create-topic form.
@@ -201,14 +220,6 @@ proc renderNewTopicForm(board: Board): string =
             form ".post-form":
               action "/b/" & board.slug & "/new"
               tmethod "post"
-              tdiv ".form-row":
-                label ".smalltext":
-                  tfor "new-topic-author"
-                  say "Name"
-                input "#new-topic-author":
-                  ttype "text"
-                  name "author"
-                  value "Anonymous"
               tdiv ".form-row":
                 label ".smalltext":
                   tfor "new-topic-title"
@@ -227,16 +238,42 @@ proc renderNewTopicForm(board: Board): string =
                   ttype "submit"
                   say "Post topic"
 
+proc renderLoginRequired(actionLabel: string): string =
+  ## Renders a simple login-required message block.
+  renderFragment:
+    section "#compose.section":
+      table ".grid":
+        tr:
+          td ".toprow":
+            say actionLabel
+        tr:
+          td ".row2":
+            p ".smalltext":
+              say "You must be logged in to post."
+            p ".smalltext":
+              a:
+                href "/login"
+                say "Login"
+              say " | "
+              a:
+                href "/register"
+                say "Register"
+
 proc renderBoardPage*(
   board: Board,
   rows: seq[TopicRow],
   page: int,
-  pages: int
+  pages: int,
+  currentUsername = ""
 ): string =
   ## Renders topic listing for one board.
   let basePath = "/b/" & board.slug
   let pagination = renderPagination(basePath, page, pages)
-  let newTopicForm = renderNewTopicForm(board)
+  let newTopicForm =
+    if currentUsername.len > 0:
+      renderNewTopicForm(board)
+    else:
+      renderLoginRequired("Create new topic")
   let content = renderFragment:
     section "#listing.section":
       p ".largetext":
@@ -275,7 +312,12 @@ proc renderBoardPage*(
               say fmtEpoch(row.topic.updatedAt)
       say pagination
       say newTopicForm
-  renderLayout(board.title, content)
+  renderLayout(
+    board.title,
+    content,
+    currentUsername,
+    @[("Index", "/"), (board.title, "")]
+  )
 
 proc renderReplyForm(topic: Topic): string =
   ## Renders reply form for a topic.
@@ -292,14 +334,6 @@ proc renderReplyForm(topic: Topic): string =
               tmethod "post"
               tdiv ".form-row":
                 label ".smalltext":
-                  tfor "reply-author"
-                  say "Name"
-                input "#reply-author":
-                  ttype "text"
-                  name "author"
-                  value "Anonymous"
-              tdiv ".form-row":
-                label ".smalltext":
                   tfor "reply-body"
                   say "Message"
                 textarea "#reply-body":
@@ -313,12 +347,19 @@ proc renderTopicPage*(
   topic: Topic,
   posts: seq[Post],
   page: int,
-  pages: int
+  pages: int,
+  currentUsername = "",
+  boardTitle = "",
+  boardSlug = ""
 ): string =
   ## Renders topic and replies page.
   let basePath = "/t/" & $topic.id
   let pagination = renderPagination(basePath, page, pages)
-  let replyForm = renderReplyForm(topic)
+  let replyForm =
+    if currentUsername.len > 0:
+      renderReplyForm(topic)
+    else:
+      renderLoginRequired("Reply")
   let content = renderFragment:
     section "#post.section":
       p ".largetext":
@@ -345,4 +386,11 @@ proc renderTopicPage*(
               say fmtEpoch(post.createdAt)
       say pagination
       say replyForm
-  renderLayout(topic.title, content)
+  var breadcrumb = @[("Index", "/")]
+  if boardTitle.len > 0:
+    let boardLink =
+      if boardSlug.len > 0: "/b/" & boardSlug
+      else: ""
+    breadcrumb.add((boardTitle, boardLink))
+  breadcrumb.add((topic.title, ""))
+  renderLayout(topic.title, content, currentUsername, breadcrumb)
