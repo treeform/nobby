@@ -148,9 +148,10 @@ proc renderBoardIndex*(rows: seq[BoardRow], currentUsername = ""): string =
     SectionGroup = object
       title: string
       rows: seq[BoardRow]
-  var totalTopics = 0
-  var totalPosts = 0
-  var sectionGroups: seq[SectionGroup]
+  var
+    totalTopics = 0
+    totalPosts = 0
+    sectionGroups: seq[SectionGroup]
   for row in rows:
     totalTopics += row.topicCount
     totalPosts += row.postCount
@@ -277,13 +278,14 @@ proc renderBoardPage*(
   currentUsername = ""
 ): string =
   ## Renders topic listing for one board.
-  let basePath = "/b/" & board.slug
-  let pagination = renderPagination(basePath, page, pages)
-  let newTopicForm =
-    if currentUsername.len > 0:
-      renderNewTopicForm(board)
-    else:
-      renderLoginRequired("Create new topic")
+  let
+    basePath = "/b/" & board.slug
+    pagination = renderPagination(basePath, page, pages)
+    newTopicForm =
+      if currentUsername.len > 0:
+        renderNewTopicForm(board)
+      else:
+        renderLoginRequired("Create new topic")
   let content = renderFragment:
     section "#listing.section":
       say pagination
@@ -358,13 +360,14 @@ proc renderTopicPage*(
   boardSlug = ""
 ): string =
   ## Renders topic and replies page.
-  let basePath = "/t/" & $topic.id
-  let pagination = renderPagination(basePath, page, pages)
-  let replyForm =
-    if currentUsername.len > 0:
-      renderReplyForm(topic)
-    else:
-      renderLoginRequired("Reply")
+  let
+    basePath = "/t/" & $topic.id
+    pagination = renderPagination(basePath, page, pages)
+    replyForm =
+      if currentUsername.len > 0:
+        renderReplyForm(topic)
+      else:
+        renderLoginRequired("Reply")
   let content = renderFragment:
     section "#post.section":
       say pagination

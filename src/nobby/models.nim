@@ -25,6 +25,7 @@ type
     authorName*: string
     body*: string
     createdAt*: int64
+
   BoardLastPost* = object
     topicId*: int
     topicTitle*: string
@@ -101,6 +102,7 @@ proc getBoardById*(pool: Pool, boardId: int): Board =
 proc countTopicsByBoard*(pool: Pool, boardId: int): int =
   ## Counts topics in a board.
   pool.filter(Topic, it.boardId == boardId).len
+
 proc countPostsByBoard*(pool: Pool, boardId: int): int =
   ## Counts all posts in all topics for one board.
   let rows = pool.query(
@@ -109,6 +111,7 @@ proc countPostsByBoard*(pool: Pool, boardId: int): int =
   )
   if rows.len > 0 and rows[0].len > 0:
     return rows[0][0].parseInt()
+
 proc getLastPostByBoard*(pool: Pool, boardId: int): BoardLastPost =
   ## Returns latest post metadata for one board.
   let rows = pool.query(
@@ -129,9 +132,10 @@ proc listTopicsByBoard*(
   pageSize = 30
 ): seq[Topic] =
   ## Lists paged topics sorted by latest activity.
-  let safePage = max(1, page)
-  let safePageSize = max(1, pageSize)
-  let offset = (safePage - 1) * safePageSize
+  let
+    safePage = max(1, page)
+    safePageSize = max(1, pageSize)
+    offset = (safePage - 1) * safePageSize
   pool.query(
     Topic,
     "SELECT * FROM topic WHERE board_id = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
@@ -155,9 +159,10 @@ proc listPostsByTopic*(
   pageSize = 30
 ): seq[Post] =
   ## Lists paged posts sorted oldest first.
-  let safePage = max(1, page)
-  let safePageSize = max(1, pageSize)
-  let offset = (safePage - 1) * safePageSize
+  let
+    safePage = max(1, page)
+    safePageSize = max(1, pageSize)
+    offset = (safePage - 1) * safePageSize
   pool.query(
     Post,
     "SELECT * FROM post WHERE topic_id = ? ORDER BY created_at ASC, id ASC LIMIT ? OFFSET ?",
