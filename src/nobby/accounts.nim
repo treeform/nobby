@@ -349,7 +349,13 @@ proc renderAccountLayout*(
         tdiv ".page":
           table ".lineup header-layout":
             tr:
-              td ".smalltext account-cell":
+              td ".smalltext":
+                p ".smalltext":
+                  span ".maintitle":
+                    say "Nobby, a bulletin board style forum"
+                p ".smalltext":
+                  say "Visual forum inspired by the early 2000s message boards."
+              td ".right.smalltext account-cell":
                 a:
                   href "/login"
                   say "Login"
@@ -357,12 +363,6 @@ proc renderAccountLayout*(
                 a:
                   href "/register"
                   say "Register"
-              td ".smalltext":
-                p ".smalltext":
-                  span ".maintitle":
-                    say "Nobby, a bulletin board style forum"
-                p ".smalltext":
-                  say "Visual forum inspired by the early 2000s message boards."
           p ".navigation":
             a:
               href "/"

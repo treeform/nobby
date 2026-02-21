@@ -65,17 +65,16 @@ proc renderBreadcrumb(pathItems: seq[(string, string)]): string =
   ## Renders breadcrumb links for page navigation.
   renderFragment:
     p ".smalltext":
-      for i, (title, hrefValue) in pathItems:
-        if hrefValue.len > 0:
-          b:
+      span ".crumb smalltext":
+        for i, (title, hrefValue) in pathItems:
+          if hrefValue.len > 0:
             a:
               href hrefValue
               say esc(title)
-        else:
-          b:
+          else:
             say esc(title)
-        if i < pathItems.high:
-          say " >>> "
+          if i < pathItems.high:
+            say " > "
 
 proc renderLayout(
   pageTitle: string,
@@ -97,7 +96,13 @@ proc renderLayout(
         tdiv ".page":
           table ".lineup header-layout":
             tr:
-              td ".smalltext account-cell":
+              td ".smalltext":
+                p ".smalltext":
+                  span ".maintitle":
+                    say AppTitle
+                p ".smalltext":
+                  say AppTagline
+              td ".right.smalltext account-cell":
                 if currentUsername.len == 0:
                   a:
                     href "/login"
@@ -107,14 +112,15 @@ proc renderLayout(
                     href "/register"
                     say "Register"
                 else:
-                  say "User: " & esc(currentUsername)
-              td ".smalltext":
-                p ".smalltext":
-                  span ".maintitle":
-                    say AppTitle
-                p ".smalltext":
-                  say AppTagline
-          say breadcrumbHtml
+                  say "User: "
+                  b:
+                    say esc(currentUsername)
+                  say " | "
+                  a:
+                    href "/logout"
+                    say "Logout"
+          if breadcrumb.len > 0:
+            say breadcrumbHtml
           say content
           p ".footer-note":
             say AppFooter
@@ -160,8 +166,6 @@ proc renderBoardIndex*(rows: seq[BoardRow], currentUsername = ""): string =
             span ".largetext":
               b:
                 say "Index"
-            span ".crumb.smalltext":
-              say "Root > Forums"
           td ".right.smalltext":
             say "Boards: " & $rows.len & " | Topics: " & $totalTopics & " | Posts: " & $totalPosts
       table ".grid":
@@ -211,7 +215,7 @@ proc renderBoardIndex*(rows: seq[BoardRow], currentUsername = ""): string =
                     say esc(row.lastPost.authorName)
                 else:
                   say "No posts yet"
-  renderLayout("Index", content, currentUsername, @[("Index", "")])
+  renderLayout("Index", content, currentUsername)
 
 proc renderNewTopicForm(board: Board): string =
   ## Renders create-topic form.
@@ -282,11 +286,6 @@ proc renderBoardPage*(
       renderLoginRequired("Create new topic")
   let content = renderFragment:
     section "#listing.section":
-      p ".largetext":
-        b:
-          say esc(board.title)
-      p ".meta":
-        say esc(board.description)
       say pagination
       table ".grid":
         tr:
@@ -368,11 +367,6 @@ proc renderTopicPage*(
       renderLoginRequired("Reply")
   let content = renderFragment:
     section "#post.section":
-      p ".largetext":
-        b:
-          say esc(topic.title)
-      p ".meta":
-        say "Started by " & esc(topic.authorName) & " at " & fmtEpoch(topic.createdAt)
       say pagination
       table ".grid post-layout":
         tr:
