@@ -174,7 +174,10 @@ table.lineup td {
 
 .crumb {
   display: inline-block;
-  margin-left: 8px;
+}
+
+.crumb a {
+  font-weight: 700;
 }
 
 .pagination {
@@ -240,6 +243,12 @@ table.lineup td {
 
 .post-layout .postbody {
   width: 100%;
+}
+
+.post-layout td:nth-child(3),
+.post-layout th:nth-child(3) {
+  width: 1%;
+  white-space: nowrap;
 }
 
 .postheader {

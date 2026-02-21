@@ -8,10 +8,18 @@
 </head>
 <body>
   <main class="page">
-    <p class="smalltext">
-      <span class="maintitle">Retro Forum Style Guide</span><br>
-      A distilled visual guide inspired by early 2000s message boards.
-    </p>
+    <table class="lineup">
+      <tr>
+        <td class="smalltext">
+          <span class="maintitle">Retro Forum Style Guide</span><br>
+          A distilled visual guide inspired by early 2000s message boards.
+        </td>
+        <td class="right smalltext">
+          <a href="#login">Login</a> |
+          <a href="#register">Register</a>
+        </td>
+      </tr>
+    </table>
 
     <p class="navigation">
       <a href="#index">Index</a>
@@ -25,8 +33,7 @@
       <table class="lineup">
         <tr>
           <td>
-            <span class="largetext"><b>Index View</b></span>
-            <span class="crumb smalltext">Root &gt; Forums</span>
+            <span class="crumb smalltext"><a href="#index">Root</a> <b>&raquo;</b> <a href="#listing">Forums</a></span>
           </td>
           <td class="right smalltext">
             Sample of category and forum rows.
@@ -75,8 +82,7 @@
       <table class="lineup">
         <tr>
           <td>
-            <span class="largetext"><b>Topic Listing View</b></span>
-            <span class="crumb smalltext">Forums &gt; Main Discussion</span>
+            <span class="crumb smalltext"><a href="#listing">Forums</a> <b>&raquo;</b> <a href="#post">Main Discussion</a></span>
           </td>
           <td class="right smalltext">Thread-centric table style.</td>
         </tr>
@@ -168,7 +174,7 @@
         <tr>
           <td>
             <span class="largetext"><b>Post View</b></span>
-            <span class="crumb smalltext">Main Discussion &gt; Example Topic</span>
+            <span class="crumb smalltext"><a href="#listing">Main Discussion</a> <b>&raquo;</b> <a href="#post">Example Topic</a></span>
           </td>
           <td class="right smalltext">Classic two-column author + content layout.</td>
         </tr>
@@ -244,7 +250,7 @@ mov [threadCount], eax</pre>
         <tr>
           <td>
             <span class="largetext"><b>Posting Form View</b></span>
-            <span class="crumb smalltext">Main Discussion &gt; New Topic</span>
+            <span class="crumb smalltext"><a href="#listing">Main Discussion</a> <b>&raquo;</b> <a href="#compose">New Topic</a></span>
           </td>
           <td class="right smalltext">Classic forum composer controls.</td>
         </tr>

@@ -64,16 +64,18 @@ proc renderPagination(basePath: string, page: int, pages: int): string =
 proc renderBreadcrumb(pathItems: seq[(string, string)]): string =
   ## Renders breadcrumb links for page navigation.
   renderFragment:
-    p ".navigation":
+    p ".smalltext":
       for i, (title, hrefValue) in pathItems:
         if hrefValue.len > 0:
-          a:
-            href hrefValue
-            say esc(title)
+          b:
+            a:
+              href hrefValue
+              say esc(title)
         else:
-          say esc(title)
+          b:
+            say esc(title)
         if i < pathItems.high:
-          say " > "
+          say " >>> "
 
 proc renderLayout(
   pageTitle: string,
@@ -93,22 +95,25 @@ proc renderLayout(
           href "/style.css"
       body:
         tdiv ".page":
-          p ".smalltext":
-            if currentUsername.len == 0:
-              a:
-                href "/login"
-                say "Login"
-              say " | "
-              a:
-                href "/register"
-                say "Register"
-            else:
-              say "User: " & esc(currentUsername)
-          p ".smalltext":
-            span ".maintitle":
-              say AppTitle
-          p ".smalltext":
-            say AppTagline
+          table ".lineup header-layout":
+            tr:
+              td ".smalltext account-cell":
+                if currentUsername.len == 0:
+                  a:
+                    href "/login"
+                    say "Login"
+                  say " | "
+                  a:
+                    href "/register"
+                    say "Register"
+                else:
+                  say "User: " & esc(currentUsername)
+              td ".smalltext":
+                p ".smalltext":
+                  span ".maintitle":
+                    say AppTitle
+                p ".smalltext":
+                  say AppTagline
           say breadcrumbHtml
           say content
           p ".footer-note":

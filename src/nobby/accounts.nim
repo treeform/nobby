@@ -347,11 +347,22 @@ proc renderAccountLayout*(
           href "/style.css"
       body:
         tdiv ".page":
-          p ".smalltext":
-            span ".maintitle":
-              say "Nobby, a bulletin board style forum"
-          p ".smalltext":
-            say "Visual forum inspired by the early 2000s message boards."
+          table ".lineup header-layout":
+            tr:
+              td ".smalltext account-cell":
+                a:
+                  href "/login"
+                  say "Login"
+                say " | "
+                a:
+                  href "/register"
+                  say "Register"
+              td ".smalltext":
+                p ".smalltext":
+                  span ".maintitle":
+                    say "Nobby, a bulletin board style forum"
+                p ".smalltext":
+                  say "Visual forum inspired by the early 2000s message boards."
           p ".navigation":
             a:
               href "/"
