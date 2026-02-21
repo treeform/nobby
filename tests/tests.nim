@@ -179,6 +179,16 @@ proc main() =
   ])
   doAssert registerRes.code in [200, 302, 405],
     "Register request failed with code " & $registerRes.code & ". Body:\n" & registerRes.body
+  let caseVariantName = accountName[0].toUpperAscii() & accountName[1 .. ^1]
+  let caseVariantRes = postForm(curl, "/register", @[
+    ("username", caseVariantName),
+    ("email", "variant_" & accountEmail),
+    ("password", firstPassword),
+    ("repeatPassword", firstPassword)
+  ])
+  doAssert caseVariantRes.code == 400, "Case-variant username should be rejected."
+  doAssert "Username is already taken." in caseVariantRes.body,
+    "Case-variant username should return username taken error."
   var accountUserId = ""
   let accountDbPool = newPool()
   accountDbPool.add(openDatabase(tempRoot / "forum.db"))

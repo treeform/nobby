@@ -1,6 +1,7 @@
 import
   std/strutils,
   chrono,
+  markdown,
   taggy,
   models
 
@@ -31,6 +32,16 @@ proc esc(text: string): string =
 proc fmtEpoch(ts: int64): string =
   ## Formats Unix timestamp for page output.
   Timestamp(ts.float64).format("{year/4}-{month/2}-{day/2} {hour/2}:{minute/2}:{second/2} UTC")
+
+proc renderPostMarkdown(text: string): string =
+  ## Converts post markdown to HTML using GFM parsing.
+  markdown(
+    text,
+    config = initGfmConfig(
+      escape = true,
+      keepHtml = false
+    )
+  )
 
 proc sectionName(board: Board): string =
   ## Returns normalized section title for one board.
@@ -384,7 +395,7 @@ proc renderTopicPage*(
             td ".row1 authorcol":
               say esc(post.authorName)
             td ".row2 postbody":
-              say esc(post.body)
+              say renderPostMarkdown(post.body)
             td ".row1":
               say fmtEpoch(post.createdAt)
       say pagination

@@ -1,7 +1,8 @@
 import
+  std/[os, sets, strutils],
   debby/pools,
   debby/sqlite,
-  ../src/nobby/models
+  ../src/nobby/[accounts, models]
 type
   SeedReply = tuple[author: string, body: string]
   SeedTopic = object
@@ -15,6 +16,7 @@ type
     title: string
     description: string
     topics: seq[SeedTopic]
+    emptyTopicCount: int
 proc nextStamp(clock: var int64, stepSeconds = 240): int64 =
   ## Returns an increasing timestamp for realistic fake posts.
   clock += stepSeconds.int64
@@ -46,9 +48,54 @@ proc insertBoardData(pool: Pool, boardSeed: SeedBoard, clock: var int64): tuple[
         nextStamp(clock)
       )
       inc result.replies
+  if boardSeed.emptyTopicCount > 0:
+    for i in 1 .. boardSeed.emptyTopicCount:
+      var topic = Topic(
+        boardId: board.id,
+        title: "Pagination placeholder topic #" & $i,
+        authorName: "Admin",
+        createdAt: nextStamp(clock),
+        updatedAt: clock
+      )
+      pool.insert(topic)
+      inc result.topics
+
+proc makePaginationReplies(count: int): seq[SeedReply] =
+  ## Builds a sequence of replies to force pagination in one topic.
+  for i in 1 .. count:
+    result.add((
+      author: "ThreadPilot" & $((i mod 7) + 1),
+      body: "Pagination reply #" & $i & "\n\n- checkpoint: " & $i & "\n- orbit: stable"
+    ))
+
+proc ensureAccount(pool: Pool, serverSecret: string, username: string) =
+  ## Creates one account for a posting user if missing.
+  if username.len == 0:
+    return
+  if not pool.getUserByUsername(username).isNil:
+    return
+  let normalized = username.toLowerAscii()
+  let email = normalized & "@example.com"
+  discard pool.createUser(serverSecret, username, email, "hunter2")
+
+proc seedPostingAccounts(pool: Pool, seeds: seq[SeedBoard], serverSecret: string) =
+  ## Creates accounts for every user who appears in posting data.
+  var authors = initHashSet[string]()
+  for boardSeed in seeds:
+    for topicSeed in boardSeed.topics:
+      if topicSeed.starter.len > 0:
+        authors.incl(topicSeed.starter)
+      for replySeed in topicSeed.replies:
+        if replySeed.author.len > 0:
+          authors.incl(replySeed.author)
+  for author in authors.items:
+    pool.ensureAccount(serverSecret, author)
+  if pool.getUserByUsername("Admin").isNil:
+    discard pool.createUser(serverSecret, "Admin", "admin@examle.com", "hunter2")
+
 proc makeSeeds(): seq[SeedBoard] =
   ## Builds all space-themed boards, topics, and replies.
-  @[
+  result = @[
     SeedBoard(
       section: "General Discussions",
       slug: "stargazing",
@@ -58,10 +105,10 @@ proc makeSeeds(): seq[SeedBoard] =
         SeedTopic(
           title: "First telescope for city skies?",
           starter: "NovaScout",
-          body: "I can only see a slice of sky from my balcony. What setup gives the best chance of seeing Saturn clearly?",
+          body: "I can only see a slice of sky from my balcony.\n\n## Goals\n- See Saturn clearly\n- Keep setup simple\n\n`budget <= starter`",
           replies: @[
             (author: "SkyMoth", body: "Start with a small Dobsonian and a wide eyepiece. Keep your first setup simple and stable."),
-            (author: "CloudPioneer", body: "A decent tripod matters more than zoom numbers. Vibration can ruin the view."),
+            (author: "CloudPioneer", body: "A decent tripod matters more than zoom numbers.\n\n**Vibration** can ruin the view."),
             (author: "MoonRanger", body: "Use a planet app just for locating, then switch it off and let your eyes adapt.")
           ]
         ),
@@ -84,8 +131,15 @@ proc makeSeeds(): seq[SeedBoard] =
             (author: "ZenithFox", body: "I do rough circles and labels only. Quick and useful for later checks."),
             (author: "HelioKid", body: "Try soft pencils. You can smudge faint nebula edges very easily.")
           ]
+        ),
+        SeedTopic(
+          title: "Long running observations thread",
+          starter: "ThreadPilot1",
+          body: "This thread intentionally has many replies to test paging.\n\n### Notes\n- Keep posting small updates\n- Include quick markdown",
+          replies: makePaginationReplies(39)
         )
-      ]
+      ],
+      emptyTopicCount: 0
     ),
     SeedBoard(
       section: "Planets",
@@ -123,7 +177,8 @@ proc makeSeeds(): seq[SeedBoard] =
             (author: "PilotZero", body: "I would bracket exposure heavily. Light contrast there is wild.")
           ]
         )
-      ]
+      ],
+      emptyTopicCount: 0
     ),
     SeedBoard(
       section: "Planets",
@@ -161,7 +216,8 @@ proc makeSeeds(): seq[SeedBoard] =
             (author: "GridPilot", body: "Both systems can coexist if the docs are consistent.")
           ]
         )
-      ]
+      ],
+      emptyTopicCount: 0
     ),
     SeedBoard(
       section: "General Discussions",
@@ -199,7 +255,8 @@ proc makeSeeds(): seq[SeedBoard] =
             (author: "DriftMason", body: "Anything with long arcs and team timing would be great.")
           ]
         )
-      ]
+      ],
+      emptyTopicCount: 0
     ),
     SeedBoard(
       section: "Planets",
@@ -237,7 +294,8 @@ proc makeSeeds(): seq[SeedBoard] =
             (author: "RedLedger", body: "Post rules near corridor entries so visitors can follow easily.")
           ]
         )
-      ]
+      ],
+      emptyTopicCount: 0
     ),
     SeedBoard(
       section: "Planets",
@@ -275,7 +333,8 @@ proc makeSeeds(): seq[SeedBoard] =
             (author: "ShieldFrame", body: "Callisto for calmer radiation environment.")
           ]
         )
-      ]
+      ],
+      emptyTopicCount: 0
     ),
     SeedBoard(
       section: "Planets",
@@ -313,7 +372,8 @@ proc makeSeeds(): seq[SeedBoard] =
             (author: "ArcLamp", body: "This challenge is unexpectedly relaxing after long shifts.")
           ]
         )
-      ]
+      ],
+      emptyTopicCount: 0
     ),
     SeedBoard(
       section: "Off Topic Discussions",
@@ -351,21 +411,34 @@ proc makeSeeds(): seq[SeedBoard] =
             (author: "SpareParts", body: "Anything steady with no sudden volume spikes.")
           ]
         )
-      ]
+      ],
+      emptyTopicCount: 0
+    ),
+    SeedBoard(
+      section: "General Discussions",
+      slug: "paging-lab",
+      title: "Paging Lab",
+      description: "High-volume board for pagination testing.",
+      topics: @[],
+      emptyTopicCount: 40
     )
   ]
 proc main() =
   ## Generates fake forum data for local visual testing.
+  let serverSecret = getEnv("NOBBY_SERVER_SECRET", "nobby-dev-secret-change-me")
   let pool = newForumPool("forum.db", 2)
   pool.initSchema()
+  pool.initAccountsSchema()
   if pool.listBoards().len > 0:
     echo "Database is not empty. Clear forum.db first, then rerun this script."
     quit(1)
-  var clock = nowEpoch() - 20'i64 * 24'i64 * 60'i64 * 60'i64
+  let seeds = makeSeeds()
+  pool.seedPostingAccounts(seeds, serverSecret)
+  var clock = models.nowEpoch() - 20'i64 * 24'i64 * 60'i64 * 60'i64
   var boardCount = 0
   var topicCount = 0
   var replyCount = 0
-  for boardSeed in makeSeeds():
+  for boardSeed in seeds:
     let inserted = pool.insertBoardData(boardSeed, clock)
     inc boardCount
     topicCount += inserted.topics
@@ -374,5 +447,6 @@ proc main() =
   echo "Boards: ", boardCount
   echo "Topics: ", topicCount
   echo "Replies: ", replyCount
+  echo "Accounts: seeded posting users + Admin(admin@examle.com / hunter2)"
 when isMainModule:
   main()

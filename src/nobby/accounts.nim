@@ -68,6 +68,13 @@ proc getUserByUsername*(pool: Pool, username: string): AccountUser =
   let rows = pool.filter(AccountUser, it.username == username)
   if rows.len > 0:
     return rows[0]
+  let fallbackRows = pool.query(
+    AccountUser,
+    "SELECT * FROM account_user WHERE lower(username) = lower(?) LIMIT 1",
+    username
+  )
+  if fallbackRows.len > 0:
+    return fallbackRows[0]
 
 proc getUserByEmail*(pool: Pool, email: string): AccountUser =
   ## Finds one user by email.
