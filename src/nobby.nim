@@ -158,9 +158,7 @@ proc respondErrorPage(
 ) =
   ## Logs and returns a rendered error page for all expected failures.
   logValidationFailure(routeName, request, message)
-  var body = ""
-  {.cast(gcsafe).}:
-    body = renderErrorPage(statusCode, message, currentUsername)
+  let body = renderErrorPage(statusCode, message, currentUsername)
   request.respondHtml(statusCode, body)
 
 proc respondRedirect(request: Request, location: string) =
@@ -235,9 +233,7 @@ proc indexHandler(request: Request) {.gcsafe.} =
         postCount: pool.countPostsByBoard(board.id),
         lastPost: pool.getLastPostByBoard(board.id)
       ))
-    var body = ""
-    {.cast(gcsafe).}:
-      body = renderBoardIndex(rows, if currentUser.isNil: "" else: currentUser.username)
+    let body = renderBoardIndex(rows, if currentUser.isNil: "" else: currentUser.username)
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("indexHandler", request, e)
@@ -263,9 +259,7 @@ proc boardHandler(request: Request) {.gcsafe.} =
     for topic in pool.listTopicsByBoard(board.id, page, PageSize):
       let replies = max(0, pool.countPostsByTopic(topic.id) - 1)
       rows.add(TopicRow(topic: topic, replyCount: replies))
-    var body = ""
-    {.cast(gcsafe).}:
-      body = renderBoardPage(board, rows, page, pages, if currentUser.isNil: "" else: currentUser.username)
+    let body = renderBoardPage(board, rows, page, pages, if currentUser.isNil: "" else: currentUser.username)
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("boardHandler", request, e)
@@ -298,17 +292,15 @@ proc topicHandler(request: Request) {.gcsafe.} =
     let pages = totalPages(postCount, PageSize)
     let posts = pool.listPostsByTopic(topic.id, page, PageSize)
     let board = pool.getBoardById(topic.boardId)
-    var body = ""
-    {.cast(gcsafe).}:
-      body = renderTopicPage(
-        topic,
-        posts,
-        page,
-        pages,
-        if currentUser.isNil: "" else: currentUser.username,
-        if board.isNil: "" else: board.title,
-        if board.isNil: "" else: board.slug
-      )
+    let body = renderTopicPage(
+      topic,
+      posts,
+      page,
+      pages,
+      if currentUser.isNil: "" else: currentUser.username,
+      if board.isNil: "" else: board.title,
+      if board.isNil: "" else: board.slug
+    )
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("topicHandler", request, e)
@@ -388,9 +380,7 @@ proc replyHandler(request: Request) {.gcsafe.} =
 proc registerPageHandler(request: Request) {.gcsafe.} =
   ## Handles register page GET.
   try:
-    var body = ""
-    {.cast(gcsafe).}:
-      body = renderRegisterPage()
+    let body = renderRegisterPage()
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("registerPageHandler", request, e)
@@ -406,30 +396,22 @@ proc registerSubmitHandler(request: Request) {.gcsafe.} =
     let repeatPassword = form.formValue("repeatPassword")
     if username.len < 3 or email.len < 3 or password.len < 6:
       logValidationFailure("registerSubmitHandler", request, "username/email/password are too short")
-      var invalidForm = ""
-      {.cast(gcsafe).}:
-        invalidForm = renderRegisterPage("Username/email/password are too short.", username, email)
+      let invalidForm = renderRegisterPage("Username/email/password are too short.", username, email)
       request.respondHtml(400, invalidForm)
       return
     if password != repeatPassword:
       logValidationFailure("registerSubmitHandler", request, "passwords do not match")
-      var mismatch = ""
-      {.cast(gcsafe).}:
-        mismatch = renderRegisterPage("Passwords do not match.", username, email)
+      let mismatch = renderRegisterPage("Passwords do not match.", username, email)
       request.respondHtml(400, mismatch)
       return
     if not pool.getUserByUsername(username).isNil:
       logValidationFailure("registerSubmitHandler", request, "username is already taken")
-      var duplicateName = ""
-      {.cast(gcsafe).}:
-        duplicateName = renderRegisterPage("Username is already taken.", username, email)
+      let duplicateName = renderRegisterPage("Username is already taken.", username, email)
       request.respondHtml(400, duplicateName)
       return
     if not pool.getUserByEmail(email).isNil:
       logValidationFailure("registerSubmitHandler", request, "email is already registered")
-      var duplicateEmail = ""
-      {.cast(gcsafe).}:
-        duplicateEmail = renderRegisterPage("Email is already registered.", username, email)
+      let duplicateEmail = renderRegisterPage("Email is already registered.", username, email)
       request.respondHtml(400, duplicateEmail)
       return
     let user = pool.createUser(serverSecret(), username, email, password)
@@ -442,9 +424,7 @@ proc registerSubmitHandler(request: Request) {.gcsafe.} =
 proc loginPageHandler(request: Request) {.gcsafe.} =
   ## Handles login page GET.
   try:
-    var body = ""
-    {.cast(gcsafe).}:
-      body = renderLoginPage()
+    let body = renderLoginPage()
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("loginPageHandler", request, e)
@@ -459,9 +439,7 @@ proc loginSubmitHandler(request: Request) {.gcsafe.} =
     let user = pool.authenticateUser(serverSecret(), username, password)
     if user.isNil:
       logValidationFailure("loginSubmitHandler", request, "invalid username or password")
-      var badLogin = ""
-      {.cast(gcsafe).}:
-        badLogin = renderLoginPage("Invalid username or password.", username)
+      let badLogin = renderLoginPage("Invalid username or password.", username)
       request.respondHtml(401, badLogin)
       return
     let session = pool.createSession(user.id)
@@ -483,9 +461,7 @@ proc logoutHandler(request: Request) {.gcsafe.} =
 proc forgotPasswordPageHandler(request: Request) {.gcsafe.} =
   ## Handles forgot-password page GET.
   try:
-    var body = ""
-    {.cast(gcsafe).}:
-      body = renderForgotPasswordPage()
+    let body = renderForgotPasswordPage()
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("forgotPasswordPageHandler", request, e)
@@ -502,12 +478,10 @@ proc forgotPasswordSubmitHandler(request: Request) {.gcsafe.} =
       stderr.writeLine("[mail] To: ", user.email)
       stderr.writeLine("[mail] Subject: Reset your Nobby password")
       stderr.writeLine("[mail] Body: Visit http://localhost:8080/reset-password?token=", reset.token)
-    var body = ""
-    {.cast(gcsafe).}:
-      body = renderForgotPasswordPage(
-        "If that email exists, a reset message was sent.",
-        email
-      )
+    let body = renderForgotPasswordPage(
+      "If that email exists, a reset message was sent.",
+      email
+    )
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("forgotPasswordSubmitHandler", request, e)
@@ -517,9 +491,7 @@ proc resetPasswordPageHandler(request: Request) {.gcsafe.} =
   ## Handles reset-password page GET.
   try:
     let token = parseUrl(request.uri).query["token"]
-    var body = ""
-    {.cast(gcsafe).}:
-      body = renderResetPasswordPage(token)
+    let body = renderResetPasswordPage(token)
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("resetPasswordPageHandler", request, e)
@@ -534,24 +506,18 @@ proc resetPasswordSubmitHandler(request: Request) {.gcsafe.} =
     let repeatPassword = form.formValue("repeatPassword")
     if password.len < 6:
       logValidationFailure("resetPasswordSubmitHandler", request, "password is too short")
-      var weak = ""
-      {.cast(gcsafe).}:
-        weak = renderResetPasswordPage(token, "Password is too short.")
+      let weak = renderResetPasswordPage(token, "Password is too short.")
       request.respondHtml(400, weak)
       return
     if password != repeatPassword:
       logValidationFailure("resetPasswordSubmitHandler", request, "passwords do not match")
-      var mismatch = ""
-      {.cast(gcsafe).}:
-        mismatch = renderResetPasswordPage(token, "Passwords do not match.")
+      let mismatch = renderResetPasswordPage(token, "Passwords do not match.")
       request.respondHtml(400, mismatch)
       return
     let reset = pool.consumePasswordResetToken(token)
     if reset.isNil:
       logValidationFailure("resetPasswordSubmitHandler", request, "reset token is invalid or expired")
-      var invalidToken = ""
-      {.cast(gcsafe).}:
-        invalidToken = renderResetPasswordPage(token, "Reset token is invalid or expired.")
+      let invalidToken = renderResetPasswordPage(token, "Reset token is invalid or expired.")
       request.respondHtml(400, invalidToken)
       return
     let user = pool.getUserById(reset.userId)
@@ -568,9 +534,7 @@ proc resetPasswordSubmitHandler(request: Request) {.gcsafe.} =
 proc forgotUsernamePageHandler(request: Request) {.gcsafe.} =
   ## Handles forgot-username page GET.
   try:
-    var body = ""
-    {.cast(gcsafe).}:
-      body = renderForgotUsernamePage()
+    let body = renderForgotUsernamePage()
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("forgotUsernamePageHandler", request, e)
@@ -586,12 +550,10 @@ proc forgotUsernameSubmitHandler(request: Request) {.gcsafe.} =
       stderr.writeLine("[mail] To: ", user.email)
       stderr.writeLine("[mail] Subject: Your Nobby username")
       stderr.writeLine("[mail] Body: Your username is ", user.username)
-    var body = ""
-    {.cast(gcsafe).}:
-      body = renderForgotUsernamePage(
-        "If that email exists, a username reminder was sent.",
-        email
-      )
+    let body = renderForgotUsernamePage(
+      "If that email exists, a username reminder was sent.",
+      email
+    )
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("forgotUsernameSubmitHandler", request, e)
