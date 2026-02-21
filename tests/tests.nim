@@ -220,6 +220,45 @@ proc main() =
   var authHeaders: HttpHeaders
   authHeaders["Cookie"] = sessionCookie
 
+  let otherAccountName = accountName & "_other"
+  let otherAccountEmail = otherAccountName & "@example.com"
+  let otherRegisterRes = postForm(curl, "/register", @[
+    ("username", otherAccountName),
+    ("email", otherAccountEmail),
+    ("password", firstPassword),
+    ("repeatPassword", firstPassword)
+  ])
+  doAssert otherRegisterRes.code in [200, 302, 405], "Second account register failed."
+
+  echo "Testing user profile page and edit flow."
+  let otherUserPage = curl.get(BaseUrl & "/u/" & otherAccountName, authHeaders).body
+  doAssert otherAccountName in otherUserPage, "Should be able to view another user's profile."
+  doAssert "Edit profile" notin otherUserPage, "Other user's profile should not show edit link."
+  let userPageBeforeEdit = curl.get(BaseUrl & "/u/" & accountName, authHeaders).body
+  doAssert accountName in userPageBeforeEdit, "User page should show username."
+  doAssert "Posts:" in userPageBeforeEdit and "Comments:" in userPageBeforeEdit,
+    "User page should show post and comment counts."
+  doAssert "Edit profile" in userPageBeforeEdit, "Own profile should show edit link."
+  let editPage = curl.get(BaseUrl & "/u/" & accountName & "/edit", authHeaders)
+  doAssert editPage.code == 200, "Edit user page should load for current user."
+  let forbiddenEditPage = curl.get(BaseUrl & "/u/" & otherAccountName & "/edit", authHeaders)
+  doAssert forbiddenEditPage.code == 403, "Editing another profile page should be forbidden."
+  let statusText = "Orbiting around Nim."
+  let bioText = "I build retro forums in Nim."
+  let editSave = postFormWithHeaders(curl, "/u/" & accountName & "/edit", @[
+    ("userStatus", statusText),
+    ("userBio", bioText)
+  ], authHeaders)
+  doAssert editSave.code in [200, 302, 405], "Edit profile submit failed."
+  let forbiddenEditSave = postFormWithHeaders(curl, "/u/" & otherAccountName & "/edit", @[
+    ("userStatus", "Should not save"),
+    ("userBio", "Should not save")
+  ], authHeaders)
+  doAssert forbiddenEditSave.code == 403, "Editing another profile submit should be forbidden."
+  let userPageAfterEdit = curl.get(BaseUrl & "/u/" & accountName, authHeaders).body
+  doAssert statusText in userPageAfterEdit, "User status should be saved."
+  doAssert bioText in userPageAfterEdit, "User bio should be saved."
+
   echo "Testing users page email visibility rules."
   let usersAsGuest = curl.get(BaseUrl & "/users").body
   doAssert accountName in usersAsGuest, "Users page should list registered accounts."
@@ -234,7 +273,16 @@ proc main() =
 
   echo "Testing topic creation."
   let createdTitle = "E2E topic title"
-  let createdBody = "E2E topic body for verification."
+  let createdBody = "E2E topic body line 1.\nE2E topic body line 2.\nE2E topic body line 3.\nE2E topic body line 4."
+  let shortTopicBody = "short topic line"
+  let shortTopicCreate = postMultipartFormWithHeaders(curl, boardPath & "/new", @[
+    ("author", "E2EUser"),
+    ("title", "E2E short topic"),
+    ("body", shortTopicBody)
+  ], authHeaders)
+  doAssert shortTopicCreate.code == 400, "One-line topic should be rejected."
+  doAssert "Message must be at least 4 lines." in shortTopicCreate.body,
+    "Short topic rejection message missing."
   let topicCreate = postMultipartFormWithHeaders(curl, boardPath & "/new", @[
     ("author", "E2EUser"),
     ("title", createdTitle),
@@ -252,9 +300,18 @@ proc main() =
   let topicHtml = curl.get(BaseUrl & topicPath).body
   doAssert createdTitle in topicHtml, "Created topic title not found."
   doAssert createdBody in topicHtml, "Created topic body not found."
+  doAssert statusText in topicHtml, "User status should appear under author on topic page."
 
   echo "Testing reply submission."
-  let replyBody = "E2E reply body verification."
+  let replyBody = "E2E reply line 1.\nE2E reply line 2.\nE2E reply line 3.\nE2E reply line 4."
+  let shortReplyBody = "short reply line"
+  let shortReplyCreate = postFormWithHeaders(curl, topicPath & "/reply", @[
+    ("author", "E2EReplyUser"),
+    ("body", shortReplyBody)
+  ], authHeaders)
+  doAssert shortReplyCreate.code == 400, "One-line reply should be rejected."
+  doAssert "Reply must be at least 4 lines." in shortReplyCreate.body,
+    "Short reply rejection message missing."
   let replyCreate = postFormWithHeaders(curl, topicPath & "/reply", @[
     ("author", "E2EReplyUser"),
     ("body", replyBody)
@@ -267,7 +324,7 @@ proc main() =
 
   echo "Testing cookie-authenticated posting attribution."
   let authTopicTitle = "E2E auth topic"
-  let authTopicBody = "E2E auth topic body."
+  let authTopicBody = "E2E auth topic line 1.\nE2E auth topic line 2.\nE2E auth topic line 3.\nE2E auth topic line 4."
   let authTopicCreate = postMultipartFormWithHeaders(curl, boardPath & "/new", @[
     ("author", "SpoofAuthorShouldNotAppear"),
     ("title", authTopicTitle),

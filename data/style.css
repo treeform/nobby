@@ -262,6 +262,9 @@ table.lineup td {
   font-size: 13px;
   word-wrap: break-word;
 }
+.post-layout td.postbody {
+  min-height: 5.8em;
+}
 
 .postbody p {
   margin: 0 0 10px;

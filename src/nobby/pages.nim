@@ -127,7 +127,7 @@ proc renderBoardIndex*(rows: seq[BoardRow], userCount = 0, currentUsername = "")
                   say fmtEpoch(row.lastPost.createdAt)
                   say " by "
                   a ".topiclink":
-                    href "/t/" & $row.lastPost.topicId
+                    href "/u/" & row.lastPost.authorName
                     say esc(row.lastPost.authorName)
                 else:
                   say "No posts yet"
@@ -227,7 +227,9 @@ proc renderBoardPage*(
                 href "/t/" & $row.topic.id
                 say esc(row.topic.title)
             td ".row1 center foldable":
-              say esc(row.topic.authorName)
+              a ".topiclink":
+                href "/u/" & row.topic.authorName
+                say esc(row.topic.authorName)
             td ".row2 center foldable":
               say $row.replyCount
             td ".row1":
@@ -272,9 +274,15 @@ proc renderTopicPage*(
   pages: int,
   currentUsername = "",
   boardTitle = "",
-  boardSlug = ""
+  boardSlug = "",
+  authorStatuses: seq[(string, string)] = @[]
 ): string =
   ## Renders topic and replies page.
+  proc statusForAuthor(authorName: string): string =
+    ## Finds one user status by author name.
+    for (name, status) in authorStatuses:
+      if name == authorName:
+        return status
   let
     basePath = "/t/" & $topic.id
     pagination = renderPagination(basePath, page, pages)
@@ -297,7 +305,13 @@ proc renderTopicPage*(
         for post in posts:
           tr:
             td ".row1 authorcol":
-              say esc(post.authorName)
+              a ".topiclink":
+                href "/u/" & post.authorName
+                say esc(post.authorName)
+              let status = statusForAuthor(post.authorName)
+              if status.len > 0:
+                p ".smalltext":
+                  say esc(status)
             td ".row2 postbody":
               say renderPostMarkdown(post.body)
             td ".row1":

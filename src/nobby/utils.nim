@@ -92,7 +92,9 @@ proc renderLayout*(
                 else:
                   say "User: "
                   b:
-                    say esc(currentUsername)
+                    a ".topiclink":
+                      href "/u/" & currentUsername
+                      say esc(currentUsername)
                   say " | "
                   a:
                     href "/logout"

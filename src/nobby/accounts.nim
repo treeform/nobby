@@ -1,5 +1,6 @@
 import
   std/[random, strutils],
+  markdown,
   crunchy/sha256,
   debby/[pools, sqlite],
   mummy,
@@ -15,12 +16,19 @@ const
 var
   rngInit {.threadvar.}: bool
 
+proc nowEpoch*(): int64
+proc syncUserCounters*(pool: Pool)
+
 type
   AccountUser* = ref object
     id*: int
     username*: string
     email*: string
     isAdmin*: bool
+    threadCount*: int
+    postCount*: int
+    userStatus*: string
+    userBio*: string
     passwordSalt*: string
     passwordHash*: string
     passwordIterations*: int
@@ -42,26 +50,39 @@ type
     usedAt*: int64
     createdAt*: int64
 
-  UserStats* = object
-    username*: string
-    email*: string
-    isAdmin*: bool
-    threadCount*: int
-    postCount*: int
-
 proc initAccountsSchema*(pool: Pool) =
   ## Creates account-related tables and indexes if needed.
   pool.withDb:
     if not db.tableExists(AccountUser):
       db.createTable(AccountUser)
     let userColumns = db.query("PRAGMA table_info(account_user)")
-    var hasIsAdmin = false
+    var
+      hasIsAdmin = false
+      hasThreadCount = false
+      hasPostCount = false
+      hasUserStatus = false
+      hasUserBio = false
     for userColumn in userColumns:
       if userColumn.len > 1 and userColumn[1] == "is_admin":
         hasIsAdmin = true
-        break
+      if userColumn.len > 1 and userColumn[1] == "thread_count":
+        hasThreadCount = true
+      if userColumn.len > 1 and userColumn[1] == "post_count":
+        hasPostCount = true
+      if userColumn.len > 1 and userColumn[1] == "user_status":
+        hasUserStatus = true
+      if userColumn.len > 1 and userColumn[1] == "user_bio":
+        hasUserBio = true
     if not hasIsAdmin:
       discard db.query("ALTER TABLE account_user ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+    if not hasThreadCount:
+      discard db.query("ALTER TABLE account_user ADD COLUMN thread_count INTEGER NOT NULL DEFAULT 0")
+    if not hasPostCount:
+      discard db.query("ALTER TABLE account_user ADD COLUMN post_count INTEGER NOT NULL DEFAULT 0")
+    if not hasUserStatus:
+      discard db.query("ALTER TABLE account_user ADD COLUMN user_status TEXT NOT NULL DEFAULT ''")
+    if not hasUserBio:
+      discard db.query("ALTER TABLE account_user ADD COLUMN user_bio TEXT NOT NULL DEFAULT ''")
     db.checkTable(AccountUser)
     db.createIndexIfNotExists(AccountUser, "username")
     db.createIndexIfNotExists(AccountUser, "email")
@@ -79,6 +100,7 @@ proc initAccountsSchema*(pool: Pool) =
     db.createIndexIfNotExists(PasswordResetToken, "userId")
     db.createIndexIfNotExists(PasswordResetToken, "token")
     db.createIndexIfNotExists(PasswordResetToken, "expiresAt")
+  pool.syncUserCounters()
 
 proc getUserByUsername*(pool: Pool, username: string): AccountUser =
   ## Finds one user by username.
@@ -121,34 +143,50 @@ proc countUsers*(pool: Pool): int =
   ## Returns total account count.
   pool.filter(AccountUser).len
 
-proc parseDbBool(value: string): bool =
-  ## Parses SQLite bool-like values.
-  let cleaned = value.strip().toLowerAscii()
-  cleaned in ["1", "true", "yes"]
-
-proc listUserStats*(pool: Pool): seq[UserStats] =
+proc listUserStats*(pool: Pool): seq[AccountUser] =
   ## Lists user account stats for profile leaderboard page.
-  let rows = pool.query(
-    "SELECT u.username, u.email, u.is_admin, " &
-      "COALESCE(t.thread_count, 0), COALESCE(p.post_count, 0) " &
-      "FROM account_user u " &
-      "LEFT JOIN (SELECT author_name, COUNT(*) AS thread_count FROM topic GROUP BY author_name) t " &
-      "ON t.author_name = u.username " &
-      "LEFT JOIN (SELECT author_name, COUNT(*) AS post_count FROM post GROUP BY author_name) p " &
-      "ON p.author_name = u.username " &
-      "ORDER BY COALESCE(p.post_count, 0) DESC, COALESCE(t.thread_count, 0) DESC, u.username ASC"
+  pool.query(
+    AccountUser,
+    "SELECT * FROM account_user ORDER BY post_count DESC, thread_count DESC, username ASC"
   )
-  for row in rows:
-    if row.len < 5:
-      continue
-    result.add(UserStats(
-      username: row[0],
-      email: row[1],
-      isAdmin: parseDbBool(row[2]),
-      threadCount: row[3].parseInt(),
-      postCount: row[4].parseInt()
-    ))
 
+proc cleanUserStatus*(value: string): string =
+  ## Normalizes short user status line.
+  result = value.strip()
+  if result.len > 140:
+    result = result[0 .. 139]
+
+proc cleanUserBio*(value: string): string =
+  ## Normalizes profile biography text.
+  result = value.strip()
+  if result.len > 4000:
+    result = result[0 .. 3999]
+
+proc syncUserCounters*(pool: Pool) =
+  ## Recomputes per-user counters from topic/post author data.
+  pool.withDb:
+    let users = db.query(AccountUser, "SELECT * FROM account_user")
+    for user in users:
+      var
+        threadCount = 0
+        postCount = 0
+      let threadRows = db.query(
+        "SELECT COUNT(*) FROM topic WHERE author_name = ?",
+        user.username
+      )
+      if threadRows.len > 0 and threadRows[0].len > 0:
+        threadCount = threadRows[0][0].parseInt()
+      let postRows = db.query(
+        "SELECT COUNT(*) FROM post WHERE author_name = ?",
+        user.username
+      )
+      if postRows.len > 0 and postRows[0].len > 0:
+        postCount = postRows[0][0].parseInt()
+      if user.threadCount != threadCount or user.postCount != postCount:
+        user.threadCount = threadCount
+        user.postCount = postCount
+        user.updatedAt = nowEpoch()
+        db.update(user)
 proc ensureRandom() =
   ## Initializes thread-local random source once.
   if not rngInit:
@@ -305,6 +343,10 @@ proc createUser*(
   result = AccountUser(
     username: cleanName,
     email: cleanMail,
+    threadCount: 0,
+    postCount: 0,
+    userStatus: "",
+    userBio: "",
     passwordSalt: salt,
     passwordHash: makePasswordHash(serverSecret, cleanName, password, salt),
     passwordIterations: DefaultPasswordIterations,
@@ -380,6 +422,32 @@ proc setUserPassword*(
   user.updatedAt = nowEpoch()
   pool.update(user)
 
+proc incrementThreadAndPostCount*(pool: Pool, user: AccountUser) =
+  ## Increments both thread and post counters after creating a thread.
+  if user.isNil:
+    return
+  user.threadCount += 1
+  user.postCount += 1
+  user.updatedAt = nowEpoch()
+  pool.update(user)
+
+proc incrementPostCount*(pool: Pool, user: AccountUser) =
+  ## Increments post counter after adding a reply.
+  if user.isNil:
+    return
+  user.postCount += 1
+  user.updatedAt = nowEpoch()
+  pool.update(user)
+
+proc updateUserProfile*(pool: Pool, user: AccountUser, statusText: string, bioText: string) =
+  ## Updates editable profile fields for one user.
+  if user.isNil:
+    return
+  user.userStatus = cleanUserStatus(statusText)
+  user.userBio = cleanUserBio(bioText)
+  user.updatedAt = nowEpoch()
+  pool.update(user)
+
 proc renderAccountLayout*(
   pageTitle: string,
   content: string,
@@ -417,7 +485,9 @@ proc renderAccountLayout*(
                 else:
                   say "User: "
                   b:
-                    say esc(currentUsername)
+                    a ".topiclink":
+                      href "/u/" & currentUsername
+                      say esc(currentUsername)
                   if isAdmin:
                     say " | "
                     a:
@@ -461,6 +531,16 @@ proc renderAccountLayout*(
           say content
           p ".footer-note":
             say "Copyright 2026 Nobby. MIT License."
+
+proc renderUserBioMarkdown(text: string): string =
+  ## Converts user bio markdown to safe HTML.
+  markdown(
+    text,
+    config = initGfmConfig(
+      escape = true,
+      keepHtml = false
+    )
+  )
 
 proc renderAccountMessage*(
   title: string,
@@ -706,7 +786,7 @@ proc renderForgotUsernamePage*(
   renderAccountLayout("Forgot Username", content)
 
 proc renderUsersPage*(
-  rows: seq[UserStats],
+  rows: seq[AccountUser],
   showEmails: bool,
   currentUsername = "",
   isAdmin = false,
@@ -740,11 +820,13 @@ proc renderUsersPage*(
         for row in rows:
           tr:
             td ".row1 authorcol":
-              if row.isAdmin:
-                b:
-                  say row.username & " (admin)"
-              else:
-                say row.username
+              a ".topiclink":
+                href "/u/" & row.username
+                if row.isAdmin:
+                  b:
+                    say row.username & " (admin)"
+                else:
+                  say row.username
             if showEmails:
               td ".row2":
                 say row.email
@@ -758,5 +840,120 @@ proc renderUsersPage*(
     content,
     currentUsername,
     @[("Index", "/"), ("Users", "")],
+    isAdmin
+  )
+
+proc commentCount(user: AccountUser): int =
+  ## Returns reply count excluding thread starter posts.
+  if user.isNil:
+    return 0
+  max(0, user.postCount - user.threadCount)
+
+proc renderUserPage*(
+  user: AccountUser,
+  currentUsername = "",
+  isAdmin = false,
+  canEdit = false
+): string =
+  ## Renders one public user profile page.
+  let content = renderFragment:
+    section "#post.section":
+      table ".grid post-layout":
+        tr:
+          td ".toprow authorcol":
+            say "User"
+          td ".toprow":
+            say "Profile"
+          td ".toprow":
+            say "Stats"
+        tr:
+          td ".row1 authorcol":
+            b:
+              say user.username
+            if user.userStatus.len > 0:
+              p ".smalltext":
+                say esc(user.userStatus)
+          td ".row2 postbody":
+            p ".smalltext":
+              b:
+                say "Bio"
+            if user.userBio.len > 0:
+              say renderUserBioMarkdown(user.userBio)
+            else:
+              p ".smalltext":
+                say "No bio yet."
+          td ".row1":
+            p ".smalltext":
+              say "Posts: " & $user.threadCount
+            p ".smalltext":
+              say "Comments: " & $commentCount(user)
+            p ".smalltext":
+              say "Total entries: " & $user.postCount
+      if canEdit:
+        section "#compose.section":
+          table ".grid":
+            tr:
+              td ".row2":
+                form ".post-form":
+                  action "/u/" & user.username & "/edit"
+                  tmethod "get"
+                  tdiv ".form-actions":
+                    button ".btn":
+                      ttype "submit"
+                      say "Edit profile"
+  renderLayout(
+    user.username,
+    content,
+    currentUsername,
+    @[("Index", "/"), ("Users", "/users"), (user.username, "")],
+    isAdmin
+  )
+
+proc renderEditUserPage*(
+  user: AccountUser,
+  errorMessage = "",
+  currentUsername = "",
+  isAdmin = false
+): string =
+  ## Renders editable profile form for one account.
+  let content = renderFragment:
+    section "#account.section":
+      table ".grid":
+        tr:
+          td ".toprow":
+            say "Edit profile"
+        tr:
+          td ".row2":
+            if errorMessage.len > 0:
+              p ".smalltext":
+                b:
+                  say esc(errorMessage)
+            form ".post-form":
+              action "/u/" & user.username & "/edit"
+              tmethod "post"
+              tdiv ".form-row":
+                label ".smalltext":
+                  tfor "user-status"
+                  say "Status"
+                input "#user-status":
+                  ttype "text"
+                  name "userStatus"
+                  value esc(user.userStatus)
+              tdiv ".form-row":
+                label ".smalltext":
+                  tfor "user-bio"
+                  say "Bio"
+                textarea "#user-bio":
+                  name "userBio"
+                  say esc(user.userBio)
+              tdiv ".form-actions":
+                button ".btn":
+                  ttype "submit"
+                  say "Save profile"
+  renderLayout(
+    "Edit profile",
+    content,
+    currentUsername,
+    @[("Index", "/"), ("Users", "/users"), (user.username, "/u/" & user.username), ("Edit", "")],
     isAdmin
   )

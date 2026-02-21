@@ -72,11 +72,20 @@ proc ensureAccount(pool: Pool, serverSecret: string, username: string) =
   ## Creates one account for a posting user if missing.
   if username.len == 0:
     return
-  if not pool.getUserByUsername(username).isNil:
-    return
-  let normalized = username.toLowerAscii()
-  let email = normalized & "@example.com"
-  discard pool.createUser(serverSecret, username, email, "hunter2")
+  let
+    normalized = username.toLowerAscii()
+    email = normalized & "@example.com"
+    signature = "Status: charting quiet stars."
+    bio = "I like old-school forum threads, steady tools, and calm night observations."
+  var user = pool.getUserByUsername(username)
+  if user.isNil:
+    user = pool.createUser(serverSecret, username, email, "hunter2")
+  if not user.isNil and (user.userStatus.len == 0 or user.userBio.len == 0):
+    pool.updateUserProfile(
+      user,
+      if user.userStatus.len == 0: signature else: user.userStatus,
+      if user.userBio.len == 0: bio else: user.userBio
+    )
 
 proc seedPostingAccounts(pool: Pool, seeds: seq[SeedBoard], serverSecret: string) =
   ## Creates accounts for every user who appears in posting data.
@@ -97,6 +106,12 @@ proc seedPostingAccounts(pool: Pool, seeds: seq[SeedBoard], serverSecret: string
     admin.isAdmin = true
     admin.updatedAt = models.nowEpoch()
     pool.update(admin)
+  if not admin.isNil and (admin.userStatus.len == 0 or admin.userBio.len == 0):
+    pool.updateUserProfile(
+      admin,
+      if admin.userStatus.len == 0: "Status: keeping the station tidy." else: admin.userStatus,
+      if admin.userBio.len == 0: "Forum admin account for local testing and moderation checks." else: admin.userBio
+    )
 
 proc makeSeeds(): seq[SeedBoard] =
   ## Builds all space-themed boards, topics, and replies.

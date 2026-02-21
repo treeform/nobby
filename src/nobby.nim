@@ -116,6 +116,18 @@ proc cleanBody(value: string): string =
   if result.len > 12000:
     result = result[0 .. 11999]
 
+proc hasMinPostLines(value: string, minLines = 4): bool =
+  ## Ensures a post has at least the required count of non-empty lines.
+  var lineCount = 0
+  for line in value.splitLines():
+    if line.strip().len > 0:
+      inc lineCount
+  lineCount >= minLines
+
+proc cleanRouteUsername(value: string): string =
+  ## Normalizes route username segment.
+  value.strip()
+
 proc htmlHeaders(): HttpHeaders =
   ## Builds headers for HTML responses.
   result["Content-Type"] = "text/html; charset=utf-8"
@@ -292,6 +304,19 @@ proc topicHandler(request: Request) {.gcsafe.} =
     let postCount = pool.countPostsByTopic(topic.id)
     let pages = totalPages(postCount, PageSize)
     let posts = pool.listPostsByTopic(topic.id, page, PageSize)
+    var
+      authorNames: seq[string]
+      authorStatuses: seq[(string, string)]
+    for post in posts:
+      if post.authorName.len == 0:
+        continue
+      if post.authorName notin authorNames:
+        authorNames.add(post.authorName)
+    for authorName in authorNames:
+      let user = pool.getUserByUsername(authorName)
+      if user.isNil:
+        continue
+      authorStatuses.add((user.username, user.userStatus))
     let board = pool.getBoardById(topic.boardId)
     let body = renderTopicPage(
       topic,
@@ -300,7 +325,8 @@ proc topicHandler(request: Request) {.gcsafe.} =
       pages,
       if currentUser.isNil: "" else: currentUser.username,
       if board.isNil: "" else: board.title,
-      if board.isNil: "" else: board.slug
+      if board.isNil: "" else: board.slug,
+      authorStatuses
     )
     request.respondHtml(200, body)
   except Exception as e:
@@ -330,6 +356,9 @@ proc newTopicHandler(request: Request) {.gcsafe.} =
     if title.len == 0 or body.len == 0:
       request.respondErrorPage("newTopicHandler", 400, "Title and message are required.")
       return
+    if not hasMinPostLines(body):
+      request.respondErrorPage("newTopicHandler", 400, "Message must be at least 4 lines.")
+      return
     let topic = pool.createTopicWithFirstPost(
       board.id,
       title,
@@ -337,6 +366,7 @@ proc newTopicHandler(request: Request) {.gcsafe.} =
       body,
       models.nowEpoch()
     )
+    pool.incrementThreadAndPostCount(currentUser)
     request.respondRedirect("/t/" & $topic.id)
   except Exception as e:
     logHandlerException("newTopicHandler", request, e)
@@ -372,7 +402,11 @@ proc replyHandler(request: Request) {.gcsafe.} =
     if body.len == 0:
       request.respondErrorPage("replyHandler", 400, "Reply message is required.")
       return
+    if not hasMinPostLines(body):
+      request.respondErrorPage("replyHandler", 400, "Reply must be at least 4 lines.")
+      return
     discard pool.createReply(topicId, author, body, models.nowEpoch())
+    pool.incrementPostCount(currentUser)
     request.respondRedirect("/t/" & $topicId)
   except Exception as e:
     logHandlerException("replyHandler", request, e)
@@ -574,7 +608,7 @@ proc usersPageHandler(request: Request) {.gcsafe.} =
       page = requestedPage
       startAt = 0
       endAt = 0
-      rows: seq[UserStats]
+      rows: seq[AccountUser]
     if page > pageCount:
       page = pageCount
     startAt = (page - 1) * PageSize
@@ -588,6 +622,73 @@ proc usersPageHandler(request: Request) {.gcsafe.} =
     request.respondHtml(200, body)
   except Exception as e:
     logHandlerException("usersPageHandler", request, e)
+    request.respondInternalError()
+
+proc userPageHandler(request: Request) {.gcsafe.} =
+  ## Handles one user profile page GET.
+  try:
+    let
+      currentUser = pool.getCurrentUser(request)
+      currentUsername = if currentUser.isNil: "" else: currentUser.username
+      isAdmin = not currentUser.isNil and currentUser.isAdmin
+      routeUsername = cleanRouteUsername(request.pathParams["username"])
+    if routeUsername.len == 0:
+      request.respondErrorPage("userPageHandler", 400, "Bad username.", currentUsername)
+      return
+    let user = pool.getUserByUsername(routeUsername)
+    if user.isNil:
+      request.respondErrorPage("userPageHandler", 404, "User not found.", currentUsername)
+      return
+    let canEdit = not currentUser.isNil and currentUser.id == user.id
+    let body = renderUserPage(user, currentUsername, isAdmin, canEdit)
+    request.respondHtml(200, body)
+  except Exception as e:
+    logHandlerException("userPageHandler", request, e)
+    request.respondInternalError()
+
+proc editUserPageHandler(request: Request) {.gcsafe.} =
+  ## Handles profile edit page GET.
+  try:
+    let
+      currentUser = pool.getCurrentUser(request)
+      currentUsername = if currentUser.isNil: "" else: currentUser.username
+      isAdmin = not currentUser.isNil and currentUser.isAdmin
+      routeUsername = cleanRouteUsername(request.pathParams["username"])
+    if currentUser.isNil:
+      request.respondErrorPage("editUserPageHandler", 401, "You must be logged in to edit your profile.")
+      return
+    if currentUser.username != routeUsername:
+      request.respondErrorPage("editUserPageHandler", 403, "You can only edit your own profile.", currentUsername)
+      return
+    let body = renderEditUserPage(currentUser, "", currentUsername, isAdmin)
+    request.respondHtml(200, body)
+  except Exception as e:
+    logHandlerException("editUserPageHandler", request, e)
+    request.respondInternalError()
+
+proc editUserSubmitHandler(request: Request) {.gcsafe.} =
+  ## Handles profile edit page POST.
+  try:
+    let
+      currentUser = pool.getCurrentUser(request)
+      currentUsername = if currentUser.isNil: "" else: currentUser.username
+      isAdmin = not currentUser.isNil and currentUser.isAdmin
+      routeUsername = cleanRouteUsername(request.pathParams["username"])
+    if currentUser.isNil:
+      request.respondErrorPage("editUserSubmitHandler", 401, "You must be logged in to edit your profile.")
+      return
+    if currentUser.username != routeUsername:
+      request.respondErrorPage("editUserSubmitHandler", 403, "You can only edit your own profile.", currentUsername)
+      return
+    let form = request.parseFormBody()
+    pool.updateUserProfile(
+      currentUser,
+      form.formValue("userStatus"),
+      form.formValue("userBio")
+    )
+    request.respondRedirect("/u/" & currentUser.username)
+  except Exception as e:
+    logHandlerException("editUserSubmitHandler", request, e)
     request.respondInternalError()
 
 var router: Router
@@ -608,6 +709,9 @@ router.post("/reset-password", resetPasswordSubmitHandler)
 router.get("/forgot-username", forgotUsernamePageHandler)
 router.post("/forgot-username", forgotUsernameSubmitHandler)
 router.get("/users", usersPageHandler)
+router.get("/u/@username", userPageHandler)
+router.get("/u/@username/edit", editUserPageHandler)
+router.post("/u/@username/edit", editUserSubmitHandler)
 router.get("/b/@slug", boardHandler)
 router.get("/t/@id", topicHandler)
 router.post("/b/@slug/new", newTopicHandler)
