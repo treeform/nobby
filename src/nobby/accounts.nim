@@ -156,13 +156,29 @@ proc getPasswordResetToken*(pool: Pool, token: string): PasswordResetToken =
 
 proc countUsers*(pool: Pool): int =
   ## Returns total account count.
-  pool.filter(AccountUser).len
+  let rows = pool.query("SELECT COUNT(*) FROM account_user")
+  if rows.len > 0 and rows[0].len > 0:
+    return rows[0][0].parseInt()
 
-proc listUserStats*(pool: Pool): seq[AccountUser] =
-  ## Lists user account stats for profile leaderboard page.
+proc listUserStats*(
+  pool: Pool,
+  page = 1,
+  pageSize = 30
+): seq[AccountUser] =
+  ## Lists paged user account stats for profile leaderboard page.
+  let
+    safePage = max(1, page)
+    safePageSize = max(1, pageSize)
+    offset = (safePage - 1) * safePageSize
   pool.query(
     AccountUser,
-    "SELECT * FROM account_user ORDER BY post_count DESC, thread_count DESC, username ASC"
+    """
+    SELECT * FROM account_user
+    ORDER BY post_count DESC, thread_count DESC, username ASC
+    LIMIT ? OFFSET ?
+    """,
+    safePageSize,
+    offset
   )
 
 proc cleanUserStatus*(value: string): string =
@@ -180,28 +196,20 @@ proc cleanUserBio*(value: string): string =
 proc syncUserCounters*(pool: Pool) =
   ## Recomputes per-user counters from topic/post author data.
   pool.withDb:
-    let users = db.query(AccountUser, "SELECT * FROM account_user")
-    for user in users:
-      var
-        threadCount = 0
-        postCount = 0
-      let threadRows = db.query(
-        "SELECT COUNT(*) FROM topic WHERE author_name = ?",
-        user.username
-      )
-      if threadRows.len > 0 and threadRows[0].len > 0:
-        threadCount = threadRows[0][0].parseInt()
-      let postRows = db.query(
-        "SELECT COUNT(*) FROM post WHERE author_name = ?",
-        user.username
-      )
-      if postRows.len > 0 and postRows[0].len > 0:
-        postCount = postRows[0][0].parseInt()
-      if user.threadCount != threadCount or user.postCount != postCount:
-        user.threadCount = threadCount
-        user.postCount = postCount
-        user.updatedAt = nowEpoch()
-        db.update(user)
+    discard db.query(
+      """
+      UPDATE account_user
+      SET
+        thread_count = COALESCE((
+          SELECT COUNT(*) FROM topic WHERE author_name = account_user.username
+        ), 0),
+        post_count = COALESCE((
+          SELECT COUNT(*) FROM post WHERE author_name = account_user.username
+        ), 0),
+        updated_at = ?
+      """,
+      nowEpoch()
+    )
 proc bytesToHex(bytes: openArray[byte]): string =
   ## Encodes bytes as lowercase hex.
   for b in bytes:

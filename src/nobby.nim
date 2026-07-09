@@ -287,12 +287,12 @@ proc indexHandler(request: Request) {.gcsafe.} =
       currentUsername = currentUsernameOf(currentUser)
       csrf = request.csrfForRequest()
     var rows: seq[BoardRow]
-    for board in pool.listBoards():
+    for stats in pool.listBoardStats():
       rows.add(BoardRow(
-        board: board,
-        topicCount: pool.countTopicsByBoard(board.id),
-        postCount: pool.countPostsByBoard(board.id),
-        lastPost: pool.getLastPostByBoard(board.id)
+        board: stats.board,
+        topicCount: stats.topicCount,
+        postCount: stats.postCount,
+        lastPost: stats.lastPost
       ))
     let body = renderBoardIndex(
       rows,
@@ -331,9 +331,8 @@ proc boardHandler(request: Request) {.gcsafe.} =
     let topicCount = pool.countTopicsByBoard(board.id)
     let pages = totalPages(topicCount, PageSize)
     var rows: seq[TopicRow]
-    for topic in pool.listTopicsByBoard(board.id, page, PageSize):
-      let replies = max(0, pool.countPostsByTopic(topic.id) - 1)
-      rows.add(TopicRow(topic: topic, replyCount: replies))
+    for stats in pool.listTopicStatsByBoard(board.id, page, PageSize):
+      rows.add(TopicRow(topic: stats.topic, replyCount: stats.replyCount))
     let body = renderBoardPage(
       board,
       rows,
@@ -893,22 +892,12 @@ proc usersPageHandler(request: Request) {.gcsafe.} =
       isAdmin = not currentUser.isNil and currentUser.isAdmin
       csrf = request.csrfForRequest()
       requestedPage = pageFromUri(request.uri)
-      allRows = pool.listUserStats()
-      pageCount = totalPages(allRows.len, PageSize)
-    var
-      page = requestedPage
-      startAt = 0
-      endAt = 0
-      rows: seq[AccountUser]
+      userCount = pool.countUsers()
+      pageCount = totalPages(userCount, PageSize)
+    var page = requestedPage
     if page > pageCount:
       page = pageCount
-    startAt = (page - 1) * PageSize
-    endAt = startAt + PageSize
-    if endAt > allRows.len:
-      endAt = allRows.len
-    if startAt < endAt:
-      for i in startAt ..< endAt:
-        rows.add(allRows[i])
+    let rows = pool.listUserStats(page, PageSize)
     let body = renderUsersPage(
       rows,
       isAdmin,

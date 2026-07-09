@@ -32,6 +32,16 @@ type
     authorName*: string
     createdAt*: int64
 
+  BoardStats* = object
+    board*: Board
+    topicCount*: int
+    postCount*: int
+    lastPost*: BoardLastPost
+
+  TopicStats* = object
+    topic*: Topic
+    replyCount*: int
+
 proc nowEpoch*(): int64 =
   ## Returns current Unix timestamp.
   getTime().toUnix()
@@ -101,7 +111,12 @@ proc getBoardById*(pool: Pool, boardId: int): Board =
 
 proc countTopicsByBoard*(pool: Pool, boardId: int): int =
   ## Counts topics in a board.
-  pool.filter(Topic, it.boardId == boardId).len
+  let rows = pool.query(
+    "SELECT COUNT(*) FROM topic WHERE board_id = ?",
+    boardId
+  )
+  if rows.len > 0 and rows[0].len > 0:
+    return rows[0][0].parseInt()
 
 proc countPostsByBoard*(pool: Pool, boardId: int): int =
   ## Counts all posts in all topics for one board.
@@ -125,6 +140,69 @@ proc getLastPostByBoard*(pool: Pool, boardId: int): BoardLastPost =
   result.topicId = rows[0][2].parseInt()
   result.topicTitle = rows[0][3]
 
+proc listBoardStats*(pool: Pool): seq[BoardStats] =
+  ## Lists boards with topic/post counts and last post in one query.
+  let rows = pool.query(
+    """
+    SELECT
+      b.id, b.section, b.slug, b.title, b.description, b.created_at,
+      COALESCE(tc.cnt, 0),
+      COALESCE(pc.cnt, 0),
+      lp.created_at, lp.author_name, lp.topic_id, lp.topic_title
+    FROM board b
+    LEFT JOIN (
+      SELECT board_id, COUNT(*) AS cnt
+      FROM topic
+      GROUP BY board_id
+    ) tc ON tc.board_id = b.id
+    LEFT JOIN (
+      SELECT t.board_id, COUNT(*) AS cnt
+      FROM post p
+      JOIN topic t ON p.topic_id = t.id
+      GROUP BY t.board_id
+    ) pc ON pc.board_id = b.id
+    LEFT JOIN (
+      SELECT
+        t.board_id,
+        p.created_at,
+        p.author_name,
+        t.id AS topic_id,
+        t.title AS topic_title
+      FROM post p
+      JOIN topic t ON p.topic_id = t.id
+      JOIN (
+        SELECT t2.board_id, MAX(p2.id) AS max_post_id
+        FROM post p2
+        JOIN topic t2 ON p2.topic_id = t2.id
+        GROUP BY t2.board_id
+      ) latest ON latest.max_post_id = p.id
+    ) lp ON lp.board_id = b.id
+    ORDER BY b.section ASC, b.created_at ASC, b.id ASC
+    """
+  )
+  for row in rows:
+    if row.len < 12:
+      continue
+    var lastPost: BoardLastPost
+    if row[10].len > 0:
+      lastPost.createdAt = row[8].parseBiggestInt().int64
+      lastPost.authorName = row[9]
+      lastPost.topicId = row[10].parseInt()
+      lastPost.topicTitle = row[11]
+    result.add(BoardStats(
+      board: Board(
+        id: row[0].parseInt(),
+        section: row[1],
+        slug: row[2],
+        title: row[3],
+        description: row[4],
+        createdAt: row[5].parseBiggestInt().int64
+      ),
+      topicCount: row[6].parseInt(),
+      postCount: row[7].parseInt(),
+      lastPost: lastPost
+    ))
+
 proc listTopicsByBoard*(
   pool: Pool,
   boardId: int,
@@ -144,13 +222,61 @@ proc listTopicsByBoard*(
     offset
   )
 
+proc listTopicStatsByBoard*(
+  pool: Pool,
+  boardId: int,
+  page = 1,
+  pageSize = 30
+): seq[TopicStats] =
+  ## Lists paged topics with reply counts in one query.
+  let
+    safePage = max(1, page)
+    safePageSize = max(1, pageSize)
+    offset = (safePage - 1) * safePageSize
+  let rows = pool.query(
+    """
+    SELECT
+      t.id, t.board_id, t.title, t.author_name, t.created_at, t.updated_at,
+      COALESCE((
+        SELECT COUNT(*) FROM post p WHERE p.topic_id = t.id
+      ), 0)
+    FROM topic t
+    WHERE t.board_id = ?
+    ORDER BY t.updated_at DESC, t.id DESC
+    LIMIT ? OFFSET ?
+    """,
+    boardId,
+    safePageSize,
+    offset
+  )
+  for row in rows:
+    if row.len < 7:
+      continue
+    let postCount = row[6].parseInt()
+    result.add(TopicStats(
+      topic: Topic(
+        id: row[0].parseInt(),
+        boardId: row[1].parseInt(),
+        title: row[2],
+        authorName: row[3],
+        createdAt: row[4].parseBiggestInt().int64,
+        updatedAt: row[5].parseBiggestInt().int64
+      ),
+      replyCount: max(0, postCount - 1)
+    ))
+
 proc getTopicById*(pool: Pool, topicId: int): Topic =
   ## Finds topic by id.
   pool.get(Topic, topicId)
 
 proc countPostsByTopic*(pool: Pool, topicId: int): int =
   ## Counts posts in a topic.
-  pool.filter(Post, it.topicId == topicId).len
+  let rows = pool.query(
+    "SELECT COUNT(*) FROM post WHERE topic_id = ?",
+    topicId
+  )
+  if rows.len > 0 and rows[0].len > 0:
+    return rows[0][0].parseInt()
 
 proc listPostsByTopic*(
   pool: Pool,
