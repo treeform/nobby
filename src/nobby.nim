@@ -135,6 +135,11 @@ proc htmlHeaders(): HttpHeaders =
   ## Builds headers for HTML responses.
   result["Content-Type"] = "text/html; charset=utf-8"
 
+proc addSetCookie(headers: var HttpHeaders, setCookie: string) =
+  ## Appends one Set-Cookie header without replacing others.
+  if setCookie.len > 0:
+    headers.toBase.add(("Set-Cookie", setCookie))
+
 proc logHttpError(request: Request, statusCode: int) =
   ## Logs all HTTP error responses to stderr.
   if statusCode >= 400:
@@ -159,37 +164,79 @@ proc logHandlerException(routeName: string, request: Request, e: ref Exception) 
   stderr.writeLine("[exception] message=", e.msg)
   stderr.writeLine(getStackTrace(e))
 
-proc respondHtml(request: Request, statusCode: int, body: string) =
-  ## Sends an HTML response.
+proc csrfForRequest(request: Request): tuple[token: string, setCookie: string] =
+  ## Returns CSRF token for this request and optional Set-Cookie value.
+  let existing = request.csrfCookieValue()
+  if existing.len > 0:
+    return (existing, "")
+  let token = makeCsrfToken()
+  (token, makeCsrfSetCookie(token))
+
+proc currentUsernameOf(user: AccountUser): string =
+  ## Returns username text for templates and error pages.
+  if user.isNil:
+    return ""
+  user.username
+
+proc respondHtml(
+  request: Request,
+  statusCode: int,
+  body: string,
+  setCookies: seq[string] = @[]
+) =
+  ## Sends an HTML response with optional Set-Cookie headers.
+  var headers = htmlHeaders()
+  for setCookie in setCookies:
+    headers.addSetCookie(setCookie)
   request.logHttpResponse(statusCode)
-  request.respond(statusCode, htmlHeaders(), body)
+  request.respond(statusCode, headers, body)
 
 proc respondErrorPage(
   request: Request,
   routeName: string,
   statusCode: int,
   message: string,
-  currentUsername = ""
+  currentUsername = "",
+  csrfToken = "",
+  setCookies: seq[string] = @[]
 ) =
   ## Logs and returns a rendered error page for all expected failures.
   logValidationFailure(routeName, request, message)
-  let body = renderErrorPage(statusCode, message, currentUsername)
-  request.respondHtml(statusCode, body)
+  let body = renderErrorPage(statusCode, message, currentUsername, csrfToken)
+  request.respondHtml(statusCode, body, setCookies)
 
-proc respondRedirect(request: Request, location: string) =
-  ## Sends a simple redirect response.
+proc respondRedirect(
+  request: Request,
+  location: string,
+  setCookies: seq[string] = @[]
+) =
+  ## Sends a redirect response with optional Set-Cookie headers.
   var headers = htmlHeaders()
   headers["Location"] = location
+  for setCookie in setCookies:
+    headers.addSetCookie(setCookie)
   request.logHttpResponse(302)
   request.respond(302, headers, "")
 
-proc respondRedirectWithCookie(request: Request, location: string, setCookie: string) =
-  ## Sends redirect and one Set-Cookie header.
-  var headers = htmlHeaders()
-  headers["Location"] = location
-  headers["Set-Cookie"] = setCookie
-  request.logHttpResponse(302)
-  request.respond(302, headers, "")
+proc requireCsrf(
+  request: Request,
+  routeName: string,
+  form: seq[(string, string)],
+  currentUsername = ""
+): bool =
+  ## Validates double-submit CSRF and responds 403 on failure.
+  let csrf = request.csrfForRequest()
+  if csrfTokensMatch(request.csrfCookieValue(), form.formValue("csrf")):
+    return true
+  request.respondErrorPage(
+    routeName,
+    403,
+    "Invalid CSRF token.",
+    currentUsername,
+    csrf.token,
+    if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+  )
+  false
 
 proc respondInternalError(request: Request) =
   ## Sends a plain fallback 500 response without template rendering.
@@ -202,6 +249,7 @@ proc respondCss(request: Request) =
   headers["Content-Type"] = "text/css; charset=utf-8"
   request.logHttpResponse(200)
   request.respond(200, headers, ForumCss)
+
 proc respondImage(request: Request) =
   ## Serves bundled SVG icon assets.
   let name = request.pathParams["name"]
@@ -234,8 +282,10 @@ pool.seedDefaultBoard()
 proc indexHandler(request: Request) {.gcsafe.} =
   ## Handles board index route.
   try:
-    let currentUser = pool.getCurrentUser(request)
-    let currentUsername = if currentUser.isNil: "" else: currentUser.username
+    let
+      currentUser = pool.getCurrentUser(request)
+      currentUsername = currentUsernameOf(currentUser)
+      csrf = request.csrfForRequest()
     var rows: seq[BoardRow]
     for board in pool.listBoards():
       rows.add(BoardRow(
@@ -244,8 +294,17 @@ proc indexHandler(request: Request) {.gcsafe.} =
         postCount: pool.countPostsByBoard(board.id),
         lastPost: pool.getLastPostByBoard(board.id)
       ))
-    let body = renderBoardIndex(rows, pool.countUsers(), currentUsername)
-    request.respondHtml(200, body)
+    let body = renderBoardIndex(
+      rows,
+      pool.countUsers(),
+      currentUsername,
+      csrf.token
+    )
+    request.respondHtml(
+      200,
+      body,
+      if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    )
   except Exception as e:
     logHandlerException("indexHandler", request, e)
     request.respondInternalError()
@@ -253,14 +312,19 @@ proc indexHandler(request: Request) {.gcsafe.} =
 proc boardHandler(request: Request) {.gcsafe.} =
   ## Handles board listing route.
   try:
-    let currentUser = pool.getCurrentUser(request)
-    let board = pool.getBoardBySlug(request.pathParams["slug"])
+    let
+      currentUser = pool.getCurrentUser(request)
+      currentUsername = currentUsernameOf(currentUser)
+      csrf = request.csrfForRequest()
+      board = pool.getBoardBySlug(request.pathParams["slug"])
     if board.isNil:
       request.respondErrorPage(
         "boardHandler",
         404,
         "Board not found.",
-        if currentUser.isNil: "" else: currentUser.username
+        currentUsername,
+        csrf.token,
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
       )
       return
     let page = pageFromUri(request.uri)
@@ -270,8 +334,19 @@ proc boardHandler(request: Request) {.gcsafe.} =
     for topic in pool.listTopicsByBoard(board.id, page, PageSize):
       let replies = max(0, pool.countPostsByTopic(topic.id) - 1)
       rows.add(TopicRow(topic: topic, replyCount: replies))
-    let body = renderBoardPage(board, rows, page, pages, if currentUser.isNil: "" else: currentUser.username)
-    request.respondHtml(200, body)
+    let body = renderBoardPage(
+      board,
+      rows,
+      page,
+      pages,
+      currentUsername,
+      csrf.token
+    )
+    request.respondHtml(
+      200,
+      body,
+      if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    )
   except Exception as e:
     logHandlerException("boardHandler", request, e)
     request.respondInternalError()
@@ -279,14 +354,19 @@ proc boardHandler(request: Request) {.gcsafe.} =
 proc topicHandler(request: Request) {.gcsafe.} =
   ## Handles topic page route.
   try:
-    let currentUser = pool.getCurrentUser(request)
-    let topicId = parsePositiveInt(request.pathParams["id"])
+    let
+      currentUser = pool.getCurrentUser(request)
+      currentUsername = currentUsernameOf(currentUser)
+      csrf = request.csrfForRequest()
+      topicId = parsePositiveInt(request.pathParams["id"])
     if topicId == 0:
       request.respondErrorPage(
         "topicHandler",
         400,
         "Bad topic id.",
-        if currentUser.isNil: "" else: currentUser.username
+        currentUsername,
+        csrf.token,
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
       )
       return
     let topic = pool.getTopicById(topicId)
@@ -295,7 +375,9 @@ proc topicHandler(request: Request) {.gcsafe.} =
         "topicHandler",
         404,
         "Topic not found.",
-        if currentUser.isNil: "" else: currentUser.username
+        currentUsername,
+        csrf.token,
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
       )
       return
     let page = pageFromUri(request.uri)
@@ -321,12 +403,17 @@ proc topicHandler(request: Request) {.gcsafe.} =
       posts,
       page,
       pages,
-      if currentUser.isNil: "" else: currentUser.username,
+      currentUsername,
       if board.isNil: "" else: board.title,
       if board.isNil: "" else: board.slug,
-      authorStatuses
+      authorStatuses,
+      csrf.token
     )
-    request.respondHtml(200, body)
+    request.respondHtml(
+      200,
+      body,
+      if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    )
   except Exception as e:
     logHandlerException("topicHandler", request, e)
     request.respondInternalError()
@@ -334,28 +421,54 @@ proc topicHandler(request: Request) {.gcsafe.} =
 proc newTopicHandler(request: Request) {.gcsafe.} =
   ## Handles create-topic form submission.
   try:
-    let board = pool.getBoardBySlug(request.pathParams["slug"])
-    let currentUser = pool.getCurrentUser(request)
+    let
+      board = pool.getBoardBySlug(request.pathParams["slug"])
+      currentUser = pool.getCurrentUser(request)
+      currentUsername = currentUsernameOf(currentUser)
+      csrf = request.csrfForRequest()
     if board.isNil:
       request.respondErrorPage(
         "newTopicHandler",
         404,
         "Board not found.",
-        if currentUser.isNil: "" else: currentUser.username
+        currentUsername,
+        csrf.token,
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
       )
       return
     if currentUser.isNil:
-      request.respondErrorPage("newTopicHandler", 401, "You must be logged in to post.")
+      request.respondErrorPage(
+        "newTopicHandler",
+        401,
+        "You must be logged in to post.",
+        "",
+        csrf.token,
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+      )
       return
     let form = request.parseFormBody()
+    if not request.requireCsrf("newTopicHandler", form, currentUsername):
+      return
     let author = currentUser.username
     let title = cleanTitle(form.formValue("title"))
     let body = cleanBody(form.formValue("body"))
     if title.len == 0 or body.len == 0:
-      request.respondErrorPage("newTopicHandler", 400, "Title and message are required.")
+      request.respondErrorPage(
+        "newTopicHandler",
+        400,
+        "Title and message are required.",
+        currentUsername,
+        csrf.token
+      )
       return
     if not hasMinPostLines(body):
-      request.respondErrorPage("newTopicHandler", 400, "Message must be at least 4 lines.")
+      request.respondErrorPage(
+        "newTopicHandler",
+        400,
+        "Message must be at least 4 lines.",
+        currentUsername,
+        csrf.token
+      )
       return
     let topic = pool.createTopicWithFirstPost(
       board.id,
@@ -373,14 +486,19 @@ proc newTopicHandler(request: Request) {.gcsafe.} =
 proc replyHandler(request: Request) {.gcsafe.} =
   ## Handles create-reply form submission.
   try:
-    let currentUser = pool.getCurrentUser(request)
-    let topicId = parsePositiveInt(request.pathParams["id"])
+    let
+      currentUser = pool.getCurrentUser(request)
+      currentUsername = currentUsernameOf(currentUser)
+      csrf = request.csrfForRequest()
+      topicId = parsePositiveInt(request.pathParams["id"])
     if topicId == 0:
       request.respondErrorPage(
         "replyHandler",
         400,
         "Bad topic id.",
-        if currentUser.isNil: "" else: currentUser.username
+        currentUsername,
+        csrf.token,
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
       )
       return
     if pool.getTopicById(topicId).isNil:
@@ -388,20 +506,43 @@ proc replyHandler(request: Request) {.gcsafe.} =
         "replyHandler",
         404,
         "Topic not found.",
-        if currentUser.isNil: "" else: currentUser.username
+        currentUsername,
+        csrf.token,
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
       )
       return
     if currentUser.isNil:
-      request.respondErrorPage("replyHandler", 401, "You must be logged in to post.")
+      request.respondErrorPage(
+        "replyHandler",
+        401,
+        "You must be logged in to post.",
+        "",
+        csrf.token,
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+      )
       return
     let form = request.parseFormBody()
+    if not request.requireCsrf("replyHandler", form, currentUsername):
+      return
     let author = currentUser.username
     let body = cleanBody(form.formValue("body"))
     if body.len == 0:
-      request.respondErrorPage("replyHandler", 400, "Reply message is required.")
+      request.respondErrorPage(
+        "replyHandler",
+        400,
+        "Reply message is required.",
+        currentUsername,
+        csrf.token
+      )
       return
     if not hasMinPostLines(body):
-      request.respondErrorPage("replyHandler", 400, "Reply must be at least 4 lines.")
+      request.respondErrorPage(
+        "replyHandler",
+        400,
+        "Reply must be at least 4 lines.",
+        currentUsername,
+        csrf.token
+      )
       return
     discard pool.createReply(topicId, author, body, models.nowEpoch())
     pool.incrementPostCount(currentUser)
@@ -413,8 +554,13 @@ proc replyHandler(request: Request) {.gcsafe.} =
 proc registerPageHandler(request: Request) {.gcsafe.} =
   ## Handles register page GET.
   try:
-    let body = renderRegisterPage()
-    request.respondHtml(200, body)
+    let csrf = request.csrfForRequest()
+    let body = renderRegisterPage(csrfToken = csrf.token)
+    request.respondHtml(
+      200,
+      body,
+      if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    )
   except Exception as e:
     logHandlerException("registerPageHandler", request, e)
     request.respondInternalError()
@@ -422,34 +568,61 @@ proc registerPageHandler(request: Request) {.gcsafe.} =
 proc registerSubmitHandler(request: Request) {.gcsafe.} =
   ## Handles register page POST.
   try:
-    let form = request.parseFormBody()
-    let username = cleanUsername(form.formValue("username"))
-    let email = cleanEmail(form.formValue("email"))
-    let password = form.formValue("password")
-    let repeatPassword = form.formValue("repeatPassword")
+    let
+      csrf = request.csrfForRequest()
+      form = request.parseFormBody()
+      username = cleanUsername(form.formValue("username"))
+      email = cleanEmail(form.formValue("email"))
+      password = form.formValue("password")
+      repeatPassword = form.formValue("repeatPassword")
+      csrfCookies =
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
     if username.len < 3 or email.len < 3 or password.len < 6:
       logValidationFailure("registerSubmitHandler", request, "username/email/password are too short")
-      let invalidForm = renderRegisterPage("Username/email/password are too short.", username, email)
-      request.respondHtml(400, invalidForm)
+      let invalidForm = renderRegisterPage(
+        "Username/email/password are too short.",
+        username,
+        email,
+        csrf.token
+      )
+      request.respondHtml(400, invalidForm, csrfCookies)
       return
     if password != repeatPassword:
       logValidationFailure("registerSubmitHandler", request, "passwords do not match")
-      let mismatch = renderRegisterPage("Passwords do not match.", username, email)
-      request.respondHtml(400, mismatch)
+      let mismatch = renderRegisterPage(
+        "Passwords do not match.",
+        username,
+        email,
+        csrf.token
+      )
+      request.respondHtml(400, mismatch, csrfCookies)
       return
     if not pool.getUserByUsername(username).isNil:
       logValidationFailure("registerSubmitHandler", request, "username is already taken")
-      let duplicateName = renderRegisterPage("Username is already taken.", username, email)
-      request.respondHtml(400, duplicateName)
+      let duplicateName = renderRegisterPage(
+        "Username is already taken.",
+        username,
+        email,
+        csrf.token
+      )
+      request.respondHtml(400, duplicateName, csrfCookies)
       return
     if not pool.getUserByEmail(email).isNil:
       logValidationFailure("registerSubmitHandler", request, "email is already registered")
-      let duplicateEmail = renderRegisterPage("Email is already registered.", username, email)
-      request.respondHtml(400, duplicateEmail)
+      let duplicateEmail = renderRegisterPage(
+        "Email is already registered.",
+        username,
+        email,
+        csrf.token
+      )
+      request.respondHtml(400, duplicateEmail, csrfCookies)
       return
     let user = pool.createUser(serverSecret(), username, email, password)
     let session = pool.createSession(user.id)
-    request.respondRedirectWithCookie("/", makeSessionSetCookie(session.token))
+    var cookies = @[makeSessionSetCookie(session.token)]
+    if csrf.setCookie.len > 0:
+      cookies.add(csrf.setCookie)
+    request.respondRedirect("/", cookies)
   except Exception as e:
     logHandlerException("registerSubmitHandler", request, e)
     request.respondInternalError()
@@ -457,8 +630,13 @@ proc registerSubmitHandler(request: Request) {.gcsafe.} =
 proc loginPageHandler(request: Request) {.gcsafe.} =
   ## Handles login page GET.
   try:
-    let body = renderLoginPage()
-    request.respondHtml(200, body)
+    let csrf = request.csrfForRequest()
+    let body = renderLoginPage(csrfToken = csrf.token)
+    request.respondHtml(
+      200,
+      body,
+      if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    )
   except Exception as e:
     logHandlerException("loginPageHandler", request, e)
     request.respondInternalError()
@@ -466,27 +644,64 @@ proc loginPageHandler(request: Request) {.gcsafe.} =
 proc loginSubmitHandler(request: Request) {.gcsafe.} =
   ## Handles login page POST.
   try:
-    let form = request.parseFormBody()
-    let username = cleanUsername(form.formValue("username"))
-    let password = form.formValue("password")
-    let user = pool.authenticateUser(serverSecret(), username, password)
+    let
+      csrf = request.csrfForRequest()
+      form = request.parseFormBody()
+      username = cleanUsername(form.formValue("username"))
+      password = form.formValue("password")
+      user = pool.authenticateUser(serverSecret(), username, password)
     if user.isNil:
       logValidationFailure("loginSubmitHandler", request, "invalid username or password")
-      let badLogin = renderLoginPage("Invalid username or password.", username)
-      request.respondHtml(401, badLogin)
+      let badLogin = renderLoginPage(
+        "Invalid username or password.",
+        username,
+        csrf.token
+      )
+      request.respondHtml(
+        401,
+        badLogin,
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+      )
       return
     let session = pool.createSession(user.id)
-    request.respondRedirectWithCookie("/", makeSessionSetCookie(session.token))
+    var cookies = @[makeSessionSetCookie(session.token)]
+    if csrf.setCookie.len > 0:
+      cookies.add(csrf.setCookie)
+    request.respondRedirect("/", cookies)
   except Exception as e:
     logHandlerException("loginSubmitHandler", request, e)
+    request.respondInternalError()
+
+proc logoutGetHandler(request: Request) {.gcsafe.} =
+  ## Rejects GET logout to prevent CSRF logout via links.
+  try:
+    let
+      currentUser = pool.getCurrentUser(request)
+      csrf = request.csrfForRequest()
+    request.respondErrorPage(
+      "logoutGetHandler",
+      405,
+      "Use POST to logout.",
+      currentUsernameOf(currentUser),
+      csrf.token,
+      if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    )
+  except Exception as e:
+    logHandlerException("logoutGetHandler", request, e)
     request.respondInternalError()
 
 proc logoutHandler(request: Request) {.gcsafe.} =
   ## Handles logout POST.
   try:
+    let
+      currentUser = pool.getCurrentUser(request)
+      currentUsername = currentUsernameOf(currentUser)
+      form = request.parseFormBody()
+    if not request.requireCsrf("logoutHandler", form, currentUsername):
+      return
     let token = request.sessionCookieValue()
     pool.clearSession(token)
-    request.respondRedirectWithCookie("/", makeClearSessionCookie())
+    request.respondRedirect("/", @[makeClearSessionCookie()])
   except Exception as e:
     logHandlerException("logoutHandler", request, e)
     request.respondInternalError()
@@ -494,8 +709,13 @@ proc logoutHandler(request: Request) {.gcsafe.} =
 proc forgotPasswordPageHandler(request: Request) {.gcsafe.} =
   ## Handles forgot-password page GET.
   try:
-    let body = renderForgotPasswordPage()
-    request.respondHtml(200, body)
+    let csrf = request.csrfForRequest()
+    let body = renderForgotPasswordPage(csrfToken = csrf.token)
+    request.respondHtml(
+      200,
+      body,
+      if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    )
   except Exception as e:
     logHandlerException("forgotPasswordPageHandler", request, e)
     request.respondInternalError()
@@ -503,9 +723,11 @@ proc forgotPasswordPageHandler(request: Request) {.gcsafe.} =
 proc forgotPasswordSubmitHandler(request: Request) {.gcsafe.} =
   ## Handles forgot-password page POST.
   try:
-    let form = request.parseFormBody()
-    let email = cleanEmail(form.formValue("email"))
-    let user = pool.getUserByEmail(email)
+    let
+      csrf = request.csrfForRequest()
+      form = request.parseFormBody()
+      email = cleanEmail(form.formValue("email"))
+      user = pool.getUserByEmail(email)
     if not user.isNil:
       let reset = pool.createPasswordResetToken(user.id)
       stderr.writeLine("[mail] To: ", user.email)
@@ -513,9 +735,14 @@ proc forgotPasswordSubmitHandler(request: Request) {.gcsafe.} =
       stderr.writeLine("[mail] Body: Visit http://localhost:8080/reset-password?token=", reset.token)
     let body = renderForgotPasswordPage(
       "If that email exists, a reset message was sent.",
-      email
+      email,
+      csrf.token
     )
-    request.respondHtml(200, body)
+    request.respondHtml(
+      200,
+      body,
+      if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    )
   except Exception as e:
     logHandlerException("forgotPasswordSubmitHandler", request, e)
     request.respondInternalError()
@@ -523,9 +750,15 @@ proc forgotPasswordSubmitHandler(request: Request) {.gcsafe.} =
 proc resetPasswordPageHandler(request: Request) {.gcsafe.} =
   ## Handles reset-password page GET.
   try:
-    let token = parseUrl(request.uri).query["token"]
-    let body = renderResetPasswordPage(token)
-    request.respondHtml(200, body)
+    let
+      csrf = request.csrfForRequest()
+      token = parseUrl(request.uri).query["token"]
+      body = renderResetPasswordPage(token, csrfToken = csrf.token)
+    request.respondHtml(
+      200,
+      body,
+      if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    )
   except Exception as e:
     logHandlerException("resetPasswordPageHandler", request, e)
     request.respondInternalError()
@@ -533,33 +766,59 @@ proc resetPasswordPageHandler(request: Request) {.gcsafe.} =
 proc resetPasswordSubmitHandler(request: Request) {.gcsafe.} =
   ## Handles reset-password page POST.
   try:
-    let form = request.parseFormBody()
-    let token = form.formValue("token")
-    let password = form.formValue("password")
-    let repeatPassword = form.formValue("repeatPassword")
+    let
+      csrf = request.csrfForRequest()
+      form = request.parseFormBody()
+      token = form.formValue("token")
+      password = form.formValue("password")
+      repeatPassword = form.formValue("repeatPassword")
+      csrfCookies =
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
     if password.len < 6:
       logValidationFailure("resetPasswordSubmitHandler", request, "password is too short")
-      let weak = renderResetPasswordPage(token, "Password is too short.")
-      request.respondHtml(400, weak)
+      let weak = renderResetPasswordPage(
+        token,
+        "Password is too short.",
+        csrf.token
+      )
+      request.respondHtml(400, weak, csrfCookies)
       return
     if password != repeatPassword:
       logValidationFailure("resetPasswordSubmitHandler", request, "passwords do not match")
-      let mismatch = renderResetPasswordPage(token, "Passwords do not match.")
-      request.respondHtml(400, mismatch)
+      let mismatch = renderResetPasswordPage(
+        token,
+        "Passwords do not match.",
+        csrf.token
+      )
+      request.respondHtml(400, mismatch, csrfCookies)
       return
     let reset = pool.consumePasswordResetToken(token)
     if reset.isNil:
       logValidationFailure("resetPasswordSubmitHandler", request, "reset token is invalid or expired")
-      let invalidToken = renderResetPasswordPage(token, "Reset token is invalid or expired.")
-      request.respondHtml(400, invalidToken)
+      let invalidToken = renderResetPasswordPage(
+        token,
+        "Reset token is invalid or expired.",
+        csrf.token
+      )
+      request.respondHtml(400, invalidToken, csrfCookies)
       return
     let user = pool.getUserById(reset.userId)
     if user.isNil:
-      request.respondErrorPage("resetPasswordSubmitHandler", 404, "Account was not found.")
+      request.respondErrorPage(
+        "resetPasswordSubmitHandler",
+        404,
+        "Account was not found.",
+        "",
+        csrf.token,
+        csrfCookies
+      )
       return
     pool.setUserPassword(serverSecret(), user, password)
     let session = pool.createSession(user.id)
-    request.respondRedirectWithCookie("/", makeSessionSetCookie(session.token))
+    var cookies = @[makeSessionSetCookie(session.token)]
+    if csrf.setCookie.len > 0:
+      cookies.add(csrf.setCookie)
+    request.respondRedirect("/", cookies)
   except Exception as e:
     logHandlerException("resetPasswordSubmitHandler", request, e)
     request.respondInternalError()
@@ -567,8 +826,13 @@ proc resetPasswordSubmitHandler(request: Request) {.gcsafe.} =
 proc forgotUsernamePageHandler(request: Request) {.gcsafe.} =
   ## Handles forgot-username page GET.
   try:
-    let body = renderForgotUsernamePage()
-    request.respondHtml(200, body)
+    let csrf = request.csrfForRequest()
+    let body = renderForgotUsernamePage(csrfToken = csrf.token)
+    request.respondHtml(
+      200,
+      body,
+      if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    )
   except Exception as e:
     logHandlerException("forgotUsernamePageHandler", request, e)
     request.respondInternalError()
@@ -576,18 +840,25 @@ proc forgotUsernamePageHandler(request: Request) {.gcsafe.} =
 proc forgotUsernameSubmitHandler(request: Request) {.gcsafe.} =
   ## Handles forgot-username page POST.
   try:
-    let form = request.parseFormBody()
-    let email = cleanEmail(form.formValue("email"))
-    let user = pool.getUserByEmail(email)
+    let
+      csrf = request.csrfForRequest()
+      form = request.parseFormBody()
+      email = cleanEmail(form.formValue("email"))
+      user = pool.getUserByEmail(email)
     if not user.isNil:
       stderr.writeLine("[mail] To: ", user.email)
       stderr.writeLine("[mail] Subject: Your Nobby username")
       stderr.writeLine("[mail] Body: Your username is ", user.username)
     let body = renderForgotUsernamePage(
       "If that email exists, a username reminder was sent.",
-      email
+      email,
+      csrf.token
     )
-    request.respondHtml(200, body)
+    request.respondHtml(
+      200,
+      body,
+      if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    )
   except Exception as e:
     logHandlerException("forgotUsernameSubmitHandler", request, e)
     request.respondInternalError()
@@ -597,8 +868,9 @@ proc usersPageHandler(request: Request) {.gcsafe.} =
   try:
     let
       currentUser = pool.getCurrentUser(request)
-      currentUsername = if currentUser.isNil: "" else: currentUser.username
+      currentUsername = currentUsernameOf(currentUser)
       isAdmin = not currentUser.isNil and currentUser.isAdmin
+      csrf = request.csrfForRequest()
       requestedPage = pageFromUri(request.uri)
       allRows = pool.listUserStats()
       pageCount = totalPages(allRows.len, PageSize)
@@ -616,8 +888,20 @@ proc usersPageHandler(request: Request) {.gcsafe.} =
     if startAt < endAt:
       for i in startAt ..< endAt:
         rows.add(allRows[i])
-    let body = renderUsersPage(rows, isAdmin, currentUsername, isAdmin, page, pageCount)
-    request.respondHtml(200, body)
+    let body = renderUsersPage(
+      rows,
+      isAdmin,
+      currentUsername,
+      isAdmin,
+      page,
+      pageCount,
+      csrf.token
+    )
+    request.respondHtml(
+      200,
+      body,
+      if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    )
   except Exception as e:
     logHandlerException("usersPageHandler", request, e)
     request.respondInternalError()
@@ -627,19 +911,42 @@ proc userPageHandler(request: Request) {.gcsafe.} =
   try:
     let
       currentUser = pool.getCurrentUser(request)
-      currentUsername = if currentUser.isNil: "" else: currentUser.username
+      currentUsername = currentUsernameOf(currentUser)
       isAdmin = not currentUser.isNil and currentUser.isAdmin
+      csrf = request.csrfForRequest()
       routeUsername = cleanRouteUsername(request.pathParams["username"])
+      csrfCookies =
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
     if routeUsername.len == 0:
-      request.respondErrorPage("userPageHandler", 400, "Bad username.", currentUsername)
+      request.respondErrorPage(
+        "userPageHandler",
+        400,
+        "Bad username.",
+        currentUsername,
+        csrf.token,
+        csrfCookies
+      )
       return
     let user = pool.getUserByUsername(routeUsername)
     if user.isNil:
-      request.respondErrorPage("userPageHandler", 404, "User not found.", currentUsername)
+      request.respondErrorPage(
+        "userPageHandler",
+        404,
+        "User not found.",
+        currentUsername,
+        csrf.token,
+        csrfCookies
+      )
       return
     let canEdit = not currentUser.isNil and currentUser.id == user.id
-    let body = renderUserPage(user, currentUsername, isAdmin, canEdit)
-    request.respondHtml(200, body)
+    let body = renderUserPage(
+      user,
+      currentUsername,
+      isAdmin,
+      canEdit,
+      csrf.token
+    )
+    request.respondHtml(200, body, csrfCookies)
   except Exception as e:
     logHandlerException("userPageHandler", request, e)
     request.respondInternalError()
@@ -649,17 +956,40 @@ proc editUserPageHandler(request: Request) {.gcsafe.} =
   try:
     let
       currentUser = pool.getCurrentUser(request)
-      currentUsername = if currentUser.isNil: "" else: currentUser.username
+      currentUsername = currentUsernameOf(currentUser)
       isAdmin = not currentUser.isNil and currentUser.isAdmin
+      csrf = request.csrfForRequest()
       routeUsername = cleanRouteUsername(request.pathParams["username"])
+      csrfCookies =
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
     if currentUser.isNil:
-      request.respondErrorPage("editUserPageHandler", 401, "You must be logged in to edit your profile.")
+      request.respondErrorPage(
+        "editUserPageHandler",
+        401,
+        "You must be logged in to edit your profile.",
+        "",
+        csrf.token,
+        csrfCookies
+      )
       return
     if currentUser.username != routeUsername:
-      request.respondErrorPage("editUserPageHandler", 403, "You can only edit your own profile.", currentUsername)
+      request.respondErrorPage(
+        "editUserPageHandler",
+        403,
+        "You can only edit your own profile.",
+        currentUsername,
+        csrf.token,
+        csrfCookies
+      )
       return
-    let body = renderEditUserPage(currentUser, "", currentUsername, isAdmin)
-    request.respondHtml(200, body)
+    let body = renderEditUserPage(
+      currentUser,
+      "",
+      currentUsername,
+      isAdmin,
+      csrf.token
+    )
+    request.respondHtml(200, body, csrfCookies)
   except Exception as e:
     logHandlerException("editUserPageHandler", request, e)
     request.respondInternalError()
@@ -669,16 +999,34 @@ proc editUserSubmitHandler(request: Request) {.gcsafe.} =
   try:
     let
       currentUser = pool.getCurrentUser(request)
-      currentUsername = if currentUser.isNil: "" else: currentUser.username
-      isAdmin = not currentUser.isNil and currentUser.isAdmin
+      currentUsername = currentUsernameOf(currentUser)
+      csrf = request.csrfForRequest()
       routeUsername = cleanRouteUsername(request.pathParams["username"])
+      csrfCookies =
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
     if currentUser.isNil:
-      request.respondErrorPage("editUserSubmitHandler", 401, "You must be logged in to edit your profile.")
+      request.respondErrorPage(
+        "editUserSubmitHandler",
+        401,
+        "You must be logged in to edit your profile.",
+        "",
+        csrf.token,
+        csrfCookies
+      )
       return
     if currentUser.username != routeUsername:
-      request.respondErrorPage("editUserSubmitHandler", 403, "You can only edit your own profile.", currentUsername)
+      request.respondErrorPage(
+        "editUserSubmitHandler",
+        403,
+        "You can only edit your own profile.",
+        currentUsername,
+        csrf.token,
+        csrfCookies
+      )
       return
     let form = request.parseFormBody()
+    if not request.requireCsrf("editUserSubmitHandler", form, currentUsername):
+      return
     pool.updateUserProfile(
       currentUser,
       form.formValue("userStatus"),
@@ -697,7 +1045,7 @@ router.get("/register", registerPageHandler)
 router.post("/register", registerSubmitHandler)
 router.get("/login", loginPageHandler)
 router.post("/login", loginSubmitHandler)
-router.get("/logout", logoutHandler)
+router.get("/logout", logoutGetHandler)
 router.post("/logout", logoutHandler)
 router.get("/forgot-password", forgotPasswordPageHandler)
 router.post("/forgot-password", forgotPasswordSubmitHandler)
@@ -715,12 +1063,16 @@ router.post("/b/@slug/new", newTopicHandler)
 router.post("/t/@id/reply", replyHandler)
 
 router.notFoundHandler = proc(request: Request) {.gcsafe.} =
-  let currentUser = pool.getCurrentUser(request)
+  let
+    currentUser = pool.getCurrentUser(request)
+    csrf = request.csrfForRequest()
   request.respondErrorPage(
     "notFoundHandler",
     404,
     "Page not found.",
-    if currentUser.isNil: "" else: currentUser.username
+    currentUsernameOf(currentUser),
+    csrf.token,
+    if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
   )
 
 let server = newServer(router)

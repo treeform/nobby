@@ -37,7 +37,12 @@ proc sectionName(board: Board): string =
   if result.len == 0:
     return "General Discussions"
 
-proc renderErrorPage*(statusCode: int, message: string, currentUsername = ""): string =
+proc renderErrorPage*(
+  statusCode: int,
+  message: string,
+  currentUsername = "",
+  csrfToken = ""
+): string =
   ## Renders basic error page.
   let content = renderFragment:
     table ".grid":
@@ -52,9 +57,20 @@ proc renderErrorPage*(statusCode: int, message: string, currentUsername = ""): s
             a:
               href "/"
               say "Back to boards"
-  renderLayout("Error", content, currentUsername, @[("Index", "/"), ("Error", "")])
+  renderLayout(
+    "Error",
+    content,
+    currentUsername,
+    @[("Index", "/"), ("Error", "")],
+    csrfToken = csrfToken
+  )
 
-proc renderBoardIndex*(rows: seq[BoardRow], userCount = 0, currentUsername = ""): string =
+proc renderBoardIndex*(
+  rows: seq[BoardRow],
+  userCount = 0,
+  currentUsername = "",
+  csrfToken = ""
+): string =
   ## Renders board index page.
   type
     SectionGroup = object
@@ -131,10 +147,11 @@ proc renderBoardIndex*(rows: seq[BoardRow], userCount = 0, currentUsername = "")
                     say esc(row.lastPost.authorName)
                 else:
                   say "No posts yet"
-  renderLayout("Index", content, currentUsername)
+  renderLayout("Index", content, currentUsername, csrfToken = csrfToken)
 
-proc renderNewTopicForm(board: Board): string =
+proc renderNewTopicForm(board: Board, csrfToken: string): string =
   ## Renders create-topic form.
+  let csrfField = renderCsrfField(csrfToken)
   renderFragment:
     section "#compose.section":
       table ".grid":
@@ -146,6 +163,7 @@ proc renderNewTopicForm(board: Board): string =
             form ".post-form":
               action "/b/" & board.slug & "/new"
               tmethod "post"
+              say csrfField
               tdiv ".form-row":
                 label ".smalltext":
                   tfor "new-topic-title"
@@ -190,7 +208,8 @@ proc renderBoardPage*(
   rows: seq[TopicRow],
   page: int,
   pages: int,
-  currentUsername = ""
+  currentUsername = "",
+  csrfToken = ""
 ): string =
   ## Renders topic listing for one board.
   let
@@ -198,7 +217,7 @@ proc renderBoardPage*(
     pagination = renderPagination(basePath, page, pages)
     newTopicForm =
       if currentUsername.len > 0:
-        renderNewTopicForm(board)
+        renderNewTopicForm(board, csrfToken)
       else:
         renderLoginRequired("Create new topic")
   let content = renderFragment:
@@ -240,11 +259,13 @@ proc renderBoardPage*(
     board.title,
     content,
     currentUsername,
-    @[("Index", "/"), (board.title, "")]
+    @[("Index", "/"), (board.title, "")],
+    csrfToken = csrfToken
   )
 
-proc renderReplyForm(topic: Topic): string =
+proc renderReplyForm(topic: Topic, csrfToken: string): string =
   ## Renders reply form for a topic.
+  let csrfField = renderCsrfField(csrfToken)
   renderFragment:
     section "#compose.section":
       table ".grid":
@@ -256,6 +277,7 @@ proc renderReplyForm(topic: Topic): string =
             form ".post-form":
               action "/t/" & $topic.id & "/reply"
               tmethod "post"
+              say csrfField
               tdiv ".form-row":
                 label ".smalltext":
                   tfor "reply-body"
@@ -275,7 +297,8 @@ proc renderTopicPage*(
   currentUsername = "",
   boardTitle = "",
   boardSlug = "",
-  authorStatuses: seq[(string, string)] = @[]
+  authorStatuses: seq[(string, string)] = @[],
+  csrfToken = ""
 ): string =
   ## Renders topic and replies page.
   proc statusForAuthor(authorName: string): string =
@@ -288,7 +311,7 @@ proc renderTopicPage*(
     pagination = renderPagination(basePath, page, pages)
     replyForm =
       if currentUsername.len > 0:
-        renderReplyForm(topic)
+        renderReplyForm(topic, csrfToken)
       else:
         renderLoginRequired("Reply")
   let content = renderFragment:
@@ -325,4 +348,10 @@ proc renderTopicPage*(
       else: ""
     breadcrumb.add((boardTitle, boardLink))
   breadcrumb.add((topic.title, ""))
-  renderLayout(topic.title, content, currentUsername, breadcrumb)
+  renderLayout(
+    topic.title,
+    content,
+    currentUsername,
+    breadcrumb,
+    csrfToken = csrfToken
+  )

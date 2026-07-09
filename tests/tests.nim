@@ -107,6 +107,39 @@ proc extractCookie(setCookieValue: string): string =
     return setCookieValue[0 ..< stop]
   setCookieValue
 
+proc extractNamedCookie(headers: HttpHeaders, cookieName: string): string =
+  ## Finds one Set-Cookie pair by cookie name.
+  for (key, value) in headers:
+    if cmpIgnoreCase(key, "Set-Cookie") != 0:
+      continue
+    let pair = extractCookie(value)
+    if pair.startsWith(cookieName & "="):
+      return pair
+
+proc mergeCookieHeader(existing: string, pair: string): string =
+  ## Merges one cookie pair into a Cookie header value.
+  if pair.len == 0:
+    return existing
+  if existing.len == 0:
+    return pair
+  existing & "; " & pair
+
+proc extractInputValue(html: string, fieldName: string): string =
+  ## Returns the value attribute for the first matching input name.
+  let nameToken = "name=\"" & fieldName & "\""
+  let namePos = html.find(nameToken)
+  if namePos < 0:
+    return ""
+  let valueToken = "value=\""
+  let valuePos = html.find(valueToken, namePos)
+  if valuePos < 0:
+    return ""
+  let valueStart = valuePos + valueToken.len
+  let valueEnd = html.find('"', valueStart)
+  if valueEnd <= valueStart:
+    return ""
+  html[valueStart ..< valueEnd]
+
 proc main() =
   ## Runs an integration smoke test against key forum flows.
   let repoRoot = getCurrentDir()
@@ -211,6 +244,56 @@ proc main() =
   var authHeaders: HttpHeaders
   authHeaders["Cookie"] = sessionCookie
 
+  echo "Testing CSRF protections."
+  let loginPageHtml = curl.get(BaseUrl & "/login").body
+  doAssert "name=\"csrf\"" in loginPageHtml, "Login form should include a csrf field."
+  let registerPageHtml = curl.get(BaseUrl & "/register").body
+  doAssert "name=\"csrf\"" in registerPageHtml, "Register form should include a csrf field."
+  let boardWithSession = curl.get(BaseUrl & boardPath, authHeaders).body
+  doAssert "name=\"csrf\"" in boardWithSession, "Authenticated topic form should include a csrf field."
+  let csrfFromBoard = extractInputValue(boardWithSession, "csrf")
+  doAssert csrfFromBoard.len > 0, "Authenticated topic form should include a csrf value."
+
+  let getLogout = curl.get(BaseUrl & "/logout", authHeaders)
+  doAssert getLogout.code in [403, 405],
+    "GET /logout should be rejected, got " & $getLogout.code
+  let stillLoggedIn = curl.get(BaseUrl & boardPath, authHeaders).body
+  doAssert "You must be logged in to post." notin stillLoggedIn,
+    "GET /logout must not clear the session."
+
+  let logoutWithoutCsrf = postFormWithHeaders(curl, "/logout", @[], authHeaders)
+  doAssert logoutWithoutCsrf.code == 403, "Logout without csrf should be rejected."
+  let stillLoggedInAfterBadLogout = curl.get(BaseUrl & boardPath, authHeaders).body
+  doAssert "You must be logged in to post." notin stillLoggedInAfterBadLogout,
+    "Logout without csrf must not clear the session."
+
+  let topicWithoutCsrf = postMultipartFormWithHeaders(curl, boardPath & "/new", @[
+    ("title", "CSRF should block this topic"),
+    ("body", "line 1\nline 2\nline 3\nline 4")
+  ], authHeaders)
+  doAssert topicWithoutCsrf.code == 403, "Topic create without csrf should be rejected."
+
+  let replyWithoutCsrf = postFormWithHeaders(curl, "/t/1/reply", @[
+    ("body", "line 1\nline 2\nline 3\nline 4")
+  ], authHeaders)
+  doAssert replyWithoutCsrf.code in [403, 404],
+    "Reply without csrf should be rejected, got " & $replyWithoutCsrf.code
+
+  let editWithoutCsrf = postFormWithHeaders(curl, "/u/" & accountName & "/edit", @[
+    ("userStatus", "csrf should block"),
+    ("userBio", "csrf should block")
+  ], authHeaders)
+  doAssert editWithoutCsrf.code == 403, "Profile edit without csrf should be rejected."
+
+  let csrfBootstrap = curl.get(BaseUrl & boardPath, authHeaders)
+  let csrfToken = extractInputValue(csrfBootstrap.body, "csrf")
+  doAssert csrfToken.len > 0, "Could not load csrf token for authenticated posts."
+  let csrfCookie = extractNamedCookie(csrfBootstrap.headers, "nobby_csrf")
+  if csrfCookie.len > 0:
+    authHeaders["Cookie"] = mergeCookieHeader(authHeaders["Cookie"], csrfCookie)
+  elif "nobby_csrf=" notin authHeaders["Cookie"]:
+    doAssert false, "Authenticated board response did not provide nobby_csrf cookie."
+
   let otherAccountName = accountName & "_other"
   let otherAccountEmail = otherAccountName & "@example.com"
   let otherRegisterRes = postForm(curl, "/register", @[
@@ -237,6 +320,7 @@ proc main() =
   let statusText = "Orbiting around Nim."
   let bioText = "I build retro forums in Nim."
   let editSave = postFormWithHeaders(curl, "/u/" & accountName & "/edit", @[
+    ("csrf", csrfToken),
     ("userStatus", statusText),
     ("userBio", bioText)
   ], authHeaders)
@@ -267,6 +351,7 @@ proc main() =
   let createdBody = "E2E topic body line 1.\nE2E topic body line 2.\nE2E topic body line 3.\nE2E topic body line 4."
   let shortTopicBody = "short topic line"
   let shortTopicCreate = postMultipartFormWithHeaders(curl, boardPath & "/new", @[
+    ("csrf", csrfToken),
     ("author", "E2EUser"),
     ("title", "E2E short topic"),
     ("body", shortTopicBody)
@@ -275,6 +360,7 @@ proc main() =
   doAssert "Message must be at least 4 lines." in shortTopicCreate.body,
     "Short topic rejection message missing."
   let topicCreate = postMultipartFormWithHeaders(curl, boardPath & "/new", @[
+    ("csrf", csrfToken),
     ("author", "E2EUser"),
     ("title", createdTitle),
     ("body", createdBody)
@@ -297,6 +383,7 @@ proc main() =
   let replyBody = "E2E reply line 1.\nE2E reply line 2.\nE2E reply line 3.\nE2E reply line 4."
   let shortReplyBody = "short reply line"
   let shortReplyCreate = postFormWithHeaders(curl, topicPath & "/reply", @[
+    ("csrf", csrfToken),
     ("author", "E2EReplyUser"),
     ("body", shortReplyBody)
   ], authHeaders)
@@ -304,6 +391,7 @@ proc main() =
   doAssert "Reply must be at least 4 lines." in shortReplyCreate.body,
     "Short reply rejection message missing."
   let replyCreate = postFormWithHeaders(curl, topicPath & "/reply", @[
+    ("csrf", csrfToken),
     ("author", "E2EReplyUser"),
     ("body", replyBody)
   ], authHeaders)
@@ -317,6 +405,7 @@ proc main() =
   let authTopicTitle = "E2E auth topic"
   let authTopicBody = "E2E auth topic line 1.\nE2E auth topic line 2.\nE2E auth topic line 3.\nE2E auth topic line 4."
   let authTopicCreate = postMultipartFormWithHeaders(curl, boardPath & "/new", @[
+    ("csrf", csrfToken),
     ("author", "SpoofAuthorShouldNotAppear"),
     ("title", authTopicTitle),
     ("body", authTopicBody)
@@ -332,7 +421,9 @@ proc main() =
   doAssert "SpoofAuthorShouldNotAppear" notin authTopicHtml, "Form author should be ignored while logged in."
 
   echo "Testing logout and guest posting attribution."
-  let logoutRes = postFormWithHeaders(curl, "/logout", @[], authHeaders)
+  let logoutRes = postFormWithHeaders(curl, "/logout", @[
+    ("csrf", csrfToken)
+  ], authHeaders)
   doAssert logoutRes.code in [200, 302, 405], "Logout request failed."
   let guestTopicCreate = postMultipartForm(curl, boardPath & "/new", @[
     ("author", "GuestAfterLogout"),

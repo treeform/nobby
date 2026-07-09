@@ -304,6 +304,22 @@ proc sessionCookieValue*(request: Request): string =
   ## Returns session token from request cookies.
   parseCookieValue(request.headers["Cookie"], "nobby_session")
 
+proc csrfCookieValue*(request: Request): string =
+  ## Returns CSRF token from request cookies.
+  parseCookieValue(request.headers["Cookie"], "nobby_csrf")
+
+proc makeCsrfToken*(): string =
+  ## Generates one CSRF token value as hex.
+  randomHex(TokenBytes)
+
+proc makeCsrfSetCookie*(token: string): string =
+  ## Builds Set-Cookie header for a CSRF token.
+  "nobby_csrf=" & token & "; Path=/; SameSite=Lax"
+
+proc csrfTokensMatch*(cookieToken: string, formToken: string): bool =
+  ## Returns true when cookie and form CSRF tokens are present and equal.
+  cookieToken.len > 0 and formToken.len > 0 and cookieToken == formToken
+
 proc makeSessionSetCookie*(token: string): string =
   ## Builds Set-Cookie header for a session token.
   "nobby_session=" & token & "; Path=/; HttpOnly; SameSite=Lax"
@@ -466,9 +482,11 @@ proc renderAccountLayout*(
   pageTitle: string,
   content: string,
   currentUsername = "",
-  isAdmin = false
+  isAdmin = false,
+  csrfToken = ""
 ): string =
   ## Renders shared account page shell.
+  let csrfField = renderCsrfField(csrfToken)
   render:
     html:
       head:
@@ -508,9 +526,13 @@ proc renderAccountLayout*(
                       href "/users"
                       say "Users"
                   say " | "
-                  a:
-                    href "/logout"
-                    say "Logout"
+                  form ".inline-form":
+                    action "/logout"
+                    tmethod "post"
+                    say csrfField
+                    button ".linkish":
+                      ttype "submit"
+                      say "Logout"
           p ".navigation":
             a:
               href "/"
@@ -539,9 +561,13 @@ proc renderAccountLayout*(
                   href "/users"
                   say "Users"
               say " | "
-              a:
-                href "/logout"
-                say "Logout"
+              form ".inline-form":
+                action "/logout"
+                tmethod "post"
+                say csrfField
+                button ".linkish":
+                  ttype "submit"
+                  say "Logout"
           say content
           p ".footer-note":
             say "Copyright 2026 Nobby. MIT License."
@@ -558,7 +584,8 @@ proc renderUserBioMarkdown(text: string): string =
 
 proc renderAccountMessage*(
   title: string,
-  message: string
+  message: string,
+  csrfToken = ""
 ): string =
   ## Renders one reusable account status block.
   let content = renderFragment:
@@ -575,14 +602,16 @@ proc renderAccountMessage*(
               a:
                 href "/"
                 say "Back to index"
-  renderAccountLayout(title, content)
+  renderAccountLayout(title, content, csrfToken = csrfToken)
 
 proc renderRegisterPage*(
   errorMessage = "",
   username = "",
-  email = ""
+  email = "",
+  csrfToken = ""
 ): string =
   ## Renders register form page.
+  let csrfField = renderCsrfField(csrfToken)
   let content = renderFragment:
     section "#account.section":
       table ".grid":
@@ -598,6 +627,7 @@ proc renderRegisterPage*(
             form ".post-form":
               action "/register"
               tmethod "post"
+              say csrfField
               tdiv ".form-row":
                 label ".smalltext":
                   tfor "register-username"
@@ -632,13 +662,15 @@ proc renderRegisterPage*(
                 button ".btn":
                   ttype "submit"
                   say "Register"
-  renderAccountLayout("Register", content)
+  renderAccountLayout("Register", content, csrfToken = csrfToken)
 
 proc renderLoginPage*(
   errorMessage = "",
-  username = ""
+  username = "",
+  csrfToken = ""
 ): string =
   ## Renders login form page.
+  let csrfField = renderCsrfField(csrfToken)
   let content = renderFragment:
     section "#account.section":
       table ".grid":
@@ -654,6 +686,7 @@ proc renderLoginPage*(
             form ".post-form":
               action "/login"
               tmethod "post"
+              say csrfField
               tdiv ".form-row":
                 label ".smalltext":
                   tfor "login-username"
@@ -681,13 +714,15 @@ proc renderLoginPage*(
               a:
                 href "/forgot-username"
                 say "Forgot username?"
-  renderAccountLayout("Login", content)
+  renderAccountLayout("Login", content, csrfToken = csrfToken)
 
 proc renderForgotPasswordPage*(
   infoMessage = "",
-  email = ""
+  email = "",
+  csrfToken = ""
 ): string =
   ## Renders forgot-password request form.
+  let csrfField = renderCsrfField(csrfToken)
   let content = renderFragment:
     section "#account.section":
       table ".grid":
@@ -703,6 +738,7 @@ proc renderForgotPasswordPage*(
             form ".post-form":
               action "/forgot-password"
               tmethod "post"
+              say csrfField
               tdiv ".form-row":
                 label ".smalltext":
                   tfor "forgot-password-email"
@@ -715,13 +751,15 @@ proc renderForgotPasswordPage*(
                 button ".btn":
                   ttype "submit"
                   say "Send reset link"
-  renderAccountLayout("Forgot Password", content)
+  renderAccountLayout("Forgot Password", content, csrfToken = csrfToken)
 
 proc renderResetPasswordPage*(
   token = "",
-  errorMessage = ""
+  errorMessage = "",
+  csrfToken = ""
 ): string =
   ## Renders password reset form.
+  let csrfField = renderCsrfField(csrfToken)
   let content = renderFragment:
     section "#account.section":
       table ".grid":
@@ -737,6 +775,7 @@ proc renderResetPasswordPage*(
             form ".post-form":
               action "/reset-password"
               tmethod "post"
+              say csrfField
               tdiv ".form-row":
                 label ".smalltext":
                   tfor "reset-token"
@@ -763,13 +802,15 @@ proc renderResetPasswordPage*(
                 button ".btn":
                   ttype "submit"
                   say "Update password"
-  renderAccountLayout("Reset Password", content)
+  renderAccountLayout("Reset Password", content, csrfToken = csrfToken)
 
 proc renderForgotUsernamePage*(
   infoMessage = "",
-  email = ""
+  email = "",
+  csrfToken = ""
 ): string =
   ## Renders forgot-username request form.
+  let csrfField = renderCsrfField(csrfToken)
   let content = renderFragment:
     section "#account.section":
       table ".grid":
@@ -785,6 +826,7 @@ proc renderForgotUsernamePage*(
             form ".post-form":
               action "/forgot-username"
               tmethod "post"
+              say csrfField
               tdiv ".form-row":
                 label ".smalltext":
                   tfor "forgot-username-email"
@@ -797,7 +839,7 @@ proc renderForgotUsernamePage*(
                 button ".btn":
                   ttype "submit"
                   say "Send username reminder"
-  renderAccountLayout("Forgot Username", content)
+  renderAccountLayout("Forgot Username", content, csrfToken = csrfToken)
 
 proc renderUsersPage*(
   rows: seq[AccountUser],
@@ -805,7 +847,8 @@ proc renderUsersPage*(
   currentUsername = "",
   isAdmin = false,
   currentPage = 1,
-  pageCount = 1
+  pageCount = 1,
+  csrfToken = ""
 ): string =
   ## Renders account statistics listing page.
   let pagination = renderPagination("/users", currentPage, pageCount)
@@ -854,7 +897,8 @@ proc renderUsersPage*(
     content,
     currentUsername,
     @[("Index", "/"), ("Users", "")],
-    isAdmin
+    isAdmin,
+    csrfToken = csrfToken
   )
 
 proc commentCount(user: AccountUser): int =
@@ -867,7 +911,8 @@ proc renderUserPage*(
   user: AccountUser,
   currentUsername = "",
   isAdmin = false,
-  canEdit = false
+  canEdit = false,
+  csrfToken = ""
 ): string =
   ## Renders one public user profile page.
   let content = renderFragment:
@@ -920,16 +965,19 @@ proc renderUserPage*(
     content,
     currentUsername,
     @[("Index", "/"), ("Users", "/users"), (user.username, "")],
-    isAdmin
+    isAdmin,
+    csrfToken = csrfToken
   )
 
 proc renderEditUserPage*(
   user: AccountUser,
   errorMessage = "",
   currentUsername = "",
-  isAdmin = false
+  isAdmin = false,
+  csrfToken = ""
 ): string =
   ## Renders editable profile form for one account.
+  let csrfField = renderCsrfField(csrfToken)
   let content = renderFragment:
     section "#account.section":
       table ".grid":
@@ -945,6 +993,7 @@ proc renderEditUserPage*(
             form ".post-form":
               action "/u/" & user.username & "/edit"
               tmethod "post"
+              say csrfField
               tdiv ".form-row":
                 label ".smalltext":
                   tfor "user-status"
@@ -969,5 +1018,6 @@ proc renderEditUserPage*(
     content,
     currentUsername,
     @[("Index", "/"), ("Users", "/users"), (user.username, "/u/" & user.username), ("Edit", "")],
-    isAdmin
+    isAdmin,
+    csrfToken = csrfToken
   )

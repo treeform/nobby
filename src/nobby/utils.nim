@@ -15,6 +15,14 @@ proc esc*(text: string): string =
   result = result.replace(">", "&gt;")
   result = result.replace("\"", "&quot;")
 
+proc renderCsrfField*(csrfToken: string): string =
+  ## Renders a hidden CSRF input for POST forms.
+  renderFragment:
+    input:
+      ttype "hidden"
+      name "csrf"
+      value esc(csrfToken)
+
 proc renderPagination*(basePath: string, page: int, pages: int): string =
   ## Renders compact pagination links.
   renderFragment:
@@ -58,10 +66,13 @@ proc renderLayout*(
   content: string,
   currentUsername = "",
   breadcrumb: seq[(string, string)] = @[],
-  isAdmin = false
+  isAdmin = false,
+  csrfToken = ""
 ): string =
   ## Renders page shell and shared navigation.
-  let breadcrumbHtml = renderBreadcrumb(breadcrumb)
+  let
+    breadcrumbHtml = renderBreadcrumb(breadcrumb)
+    csrfField = renderCsrfField(csrfToken)
   render:
     html:
       head:
@@ -96,9 +107,13 @@ proc renderLayout*(
                       href "/u/" & currentUsername
                       say esc(currentUsername)
                   say " | "
-                  a:
-                    href "/logout"
-                    say "Logout"
+                  form ".inline-form":
+                    action "/logout"
+                    tmethod "post"
+                    say csrfField
+                    button ".linkish":
+                      ttype "submit"
+                      say "Logout"
           if breadcrumb.len > 0:
             say breadcrumbHtml
           say content

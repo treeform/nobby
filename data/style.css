@@ -397,6 +397,25 @@ table.lineup td {
   color: var(--link-hover);
 }
 
+.inline-form {
+  display: inline;
+  margin: 0;
+  padding: 0;
+}
+
+.inline-form .linkish {
+  border: 0;
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+.inline-form .linkish:hover {
+  color: var(--link-hover);
+}
+
 @media (max-width: 900px) {
   .authorcol {
     width: 150px;
