@@ -138,7 +138,7 @@ proc renderBoardIndex*(
             td ".catrow":
               colspan "5"
               b:
-                say sectionGroup.title
+                say esc(sectionGroup.title)
           for row in sectionGroup.rows:
             tr:
               td ".row1 iconcell":

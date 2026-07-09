@@ -237,6 +237,19 @@ proc main() =
     doAssert stableRows[0][0] == syncedUpdatedAt,
       "Second sync with matching counters should keep updated_at."
 
+  echo "Testing createUser rejects invalid usernames."
+  var invalidCreateRaised = false
+  try:
+    discard counterPool.createUser(
+      "test-server-secret",
+      "<script>",
+      "xss@example.com",
+      "Passw0rdOne!"
+    )
+  except ValueError:
+    invalidCreateRaised = true
+  doAssert invalidCreateRaised, "createUser should raise ValueError for bad usernames."
+
   var server = startProcess(
     command = tempServerExe,
     workingDir = tempRoot,

@@ -459,7 +459,11 @@ proc createUser*(
   ## Creates one new user with stored PBKDF2 password data.
   let cleanName = cleanUsername(username)
   let cleanMail = cleanEmail(email)
-  doAssert isValidUsername(cleanName), "Username must be ASCII letters, digits, _ or -."
+  if not isValidUsername(cleanName):
+    raise newException(
+      ValueError,
+      "Username must be ASCII letters, digits, _ or -."
+    )
   if not pool.getUserByUsername(cleanName).isNil:
     raise newException(DbError, "UNIQUE constraint failed: username")
   if not pool.getUserByEmail(cleanMail).isNil:
@@ -984,12 +988,12 @@ proc renderUsersPage*(
                 href "/u/" & row.username
                 if row.isAdmin:
                   b:
-                    say row.username & " (admin)"
+                    say esc(row.username) & " (admin)"
                 else:
-                  say row.username
+                  say esc(row.username)
             if showEmails:
               td ".row2":
-                say row.email
+                say esc(row.email)
             td ".row1":
               say $row.threadCount
             td ".row2":
@@ -1031,7 +1035,7 @@ proc renderUserPage*(
         tr:
           td ".row1 authorcol":
             b:
-              say user.username
+              say esc(user.username)
             if user.userStatus.len > 0:
               p ".smalltext":
                 say esc(user.userStatus)
