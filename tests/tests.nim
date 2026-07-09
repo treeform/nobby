@@ -464,6 +464,40 @@ proc main() =
   let topicAfterReply = curl.get(BaseUrl & topicPath).body
   doAssert replyBody in topicAfterReply, "Reply body not visible after posting."
 
+  echo "Testing reply redirect to last page."
+  let topicIdForPaging = topicPath.split('/')[^1]
+  accountDbPool.withDb:
+    let baseTs = epochTime().int64 - 1000
+    for i in 1 .. 19:
+      discard db.query(
+        "INSERT INTO post (topic_id, author_name, body, created_at) VALUES (?, ?, ?, ?)",
+        topicIdForPaging,
+        accountName,
+        "Pager filler " & $i & "\nline 2\nline 3\nline 4",
+        baseTs + i
+      )
+  let pagedReplyMarker = "PagedReplyMarker" & $epochTime().int64
+  let pagedReplyBody =
+    pagedReplyMarker & " line 1.\nPaged reply line 2.\nPaged reply line 3.\nPaged reply line 4."
+  let pagedReplyCreate = postFormWithHeaders(curl, topicPath & "/reply", @[
+    ("csrf", csrfToken),
+    ("body", pagedReplyBody)
+  ], authHeaders)
+  doAssert pagedReplyCreate.code in [200, 302, 405],
+    "Paged reply failed with code " & $pagedReplyCreate.code & ". Body:\n" &
+    pagedReplyCreate.body
+  if pagedReplyCreate.code == 302:
+    doAssert pagedReplyCreate.headers["Location"] == topicPath & "?page=2",
+      "Reply should redirect to last page, got " & pagedReplyCreate.headers["Location"]
+  elif pagedReplyCreate.code in [200, 405]:
+    doAssert "page=2" in pagedReplyCreate.url,
+      "Followed reply redirect should land on page 2, got " & pagedReplyCreate.url
+  let lastPageHtml = curl.get(BaseUrl & topicPath & "?page=2").body
+  doAssert pagedReplyMarker in lastPageHtml, "New reply should be visible on last page."
+  let firstPageHtml = curl.get(BaseUrl & topicPath & "?page=1").body
+  doAssert pagedReplyMarker notin firstPageHtml,
+    "New reply should not appear on first page when paginated."
+
   echo "Testing cookie-authenticated posting attribution."
   let authTopicTitle = "E2E auth topic"
   let authTopicBody = "E2E auth topic line 1.\nE2E auth topic line 2.\nE2E auth topic line 3.\nE2E auth topic line 4."

@@ -546,7 +546,13 @@ proc replyHandler(request: Request) {.gcsafe.} =
       return
     discard pool.createReply(topicId, author, body, models.nowEpoch())
     pool.incrementPostCount(currentUser)
-    request.respondRedirect("/t/" & $topicId)
+    let
+      postCount = pool.countPostsByTopic(topicId)
+      pages = totalPages(postCount, PageSize)
+    if pages > 1:
+      request.respondRedirect("/t/" & $topicId & "?page=" & $pages)
+    else:
+      request.respondRedirect("/t/" & $topicId)
   except Exception as e:
     logHandlerException("replyHandler", request, e)
     request.respondInternalError()
