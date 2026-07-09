@@ -373,8 +373,9 @@ proc main() =
   doAssert "Edit profile" notin otherUserPage, "Other user's profile should not show edit link."
   let userPageBeforeEdit = curl.get(BaseUrl & "/u/" & accountName, authHeaders).body
   doAssert accountName in userPageBeforeEdit, "User page should show username."
-  doAssert "Posts:" in userPageBeforeEdit and "Comments:" in userPageBeforeEdit,
-    "User page should show post and comment counts."
+  doAssert "Threads:" in userPageBeforeEdit and "Replies:" in userPageBeforeEdit,
+    "User page should show thread and reply counts."
+  doAssert "Posts:" in userPageBeforeEdit, "User page should show total post count."
   doAssert "Edit profile" in userPageBeforeEdit, "Own profile should show edit link."
   let editPage = curl.get(BaseUrl & "/u/" & accountName & "/edit", authHeaders)
   doAssert editPage.code == 200, "Edit user page should load for current user."

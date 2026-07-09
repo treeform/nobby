@@ -985,7 +985,7 @@ proc renderUsersPage*(
     csrfToken = csrfToken
   )
 
-proc commentCount(user: AccountUser): int =
+proc replyCount(user: AccountUser): int =
   ## Returns reply count excluding thread starter posts.
   if user.isNil:
     return 0
@@ -1027,11 +1027,11 @@ proc renderUserPage*(
                 say "No bio yet."
           td ".row1":
             p ".smalltext":
-              say "Posts: " & $user.threadCount
+              say "Threads: " & $user.threadCount
             p ".smalltext":
-              say "Comments: " & $commentCount(user)
+              say "Replies: " & $replyCount(user)
             p ".smalltext":
-              say "Total entries: " & $user.postCount
+              say "Posts: " & $user.postCount
       if canEdit:
         section "#compose.section":
           table ".grid":
