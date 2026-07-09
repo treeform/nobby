@@ -1,7 +1,6 @@
 import
   std/strutils,
   chrono,
-  markdown,
   taggy,
   models,
   utils
@@ -40,13 +39,7 @@ proc fmtEpoch(ts: int64): string =
 
 proc renderPostMarkdown(text: string): string =
   ## Converts post markdown to HTML using GFM parsing.
-  markdown(
-    text,
-    config = initGfmConfig(
-      escape = true,
-      keepHtml = false
-    )
-  )
+  renderSafeMarkdown(text)
 
 proc sectionName(board: Board): string =
   ## Returns normalized section title for one board.

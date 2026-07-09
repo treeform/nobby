@@ -263,6 +263,24 @@ proc main() =
   doAssert cleanUserBio("日".repeat(2000)).len mod 3 == 0,
     "cleanUserBio should not split a 3-byte rune."
 
+  echo "Testing markdown URL scheme allow-list."
+  let badLinkHtml = renderSafeMarkdown("[x](javascript:alert(1))")
+  doAssert "javascript:" notin badLinkHtml.toLowerAscii(),
+    "javascript: href should be neutralized."
+  doAssert "href=\"#\"" in badLinkHtml, "Unsafe href should become #."
+  let badImgHtml = renderSafeMarkdown("![x](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)")
+  doAssert "data:" notin badImgHtml.toLowerAscii(),
+    "data: image src should be neutralized."
+  let goodLinkHtml = renderSafeMarkdown("[ok](https://example.com/a)")
+  doAssert "href=\"https://example.com/a\"" in goodLinkHtml,
+    "https links should remain."
+  let mailHtml = renderSafeMarkdown("[mail](mailto:a@example.com)")
+  doAssert "href=\"mailto:a@example.com\"" in mailHtml,
+    "mailto links should remain."
+  let relativeHtml = renderSafeMarkdown("[rel](/b/main)")
+  doAssert "href=\"/b/main\"" in relativeHtml,
+    "Relative links should remain."
+
   var server = startProcess(
     command = tempServerExe,
     workingDir = tempRoot,

@@ -1,6 +1,5 @@
 import
   std/[os, strutils, sysrand],
-  markdown,
   crunchy/sha256,
   debby/[pools, sqlite],
   mummy,
@@ -677,13 +676,7 @@ proc renderAccountLayout*(
 
 proc renderUserBioMarkdown(text: string): string =
   ## Converts user bio markdown to safe HTML.
-  markdown(
-    text,
-    config = initGfmConfig(
-      escape = true,
-      keepHtml = false
-    )
-  )
+  renderSafeMarkdown(text)
 
 proc renderAccountMessage*(
   title: string,

@@ -1,5 +1,6 @@
 import
   std/strutils,
+  markdown,
   taggy
 
 const
@@ -25,6 +26,92 @@ proc truncateUtf8*(s: string, maxBytes: int): string =
   while endAt > 0 and (ord(s[endAt]) and 0xC0) == 0x80:
     dec endAt
   s[0 ..< endAt]
+
+proc normalizeMarkdownUrl(url: string): string =
+  ## Lowercases and strips whitespace used to hide schemes.
+  for c in url.toLowerAscii():
+    if c notin {'\t', '\n', '\r', ' ', '\0'}:
+      result.add(c)
+  result = result.replace("&colon;", ":")
+  result = result.replace("&#58;", ":")
+  result = result.replace("&#x3a;", ":")
+
+proc isSafeMarkdownHref*(url: string): bool =
+  ## Returns true for http, https, mailto, or relative URLs.
+  let cleaned = normalizeMarkdownUrl(url)
+  if cleaned.len == 0:
+    return true
+  if cleaned.startsWith("http://") or
+    cleaned.startsWith("https://") or
+    cleaned.startsWith("mailto:") or
+    cleaned.startsWith("//"):
+    return true
+  let schemeEnd = cleaned.find(':')
+  if schemeEnd < 0:
+    return true
+  let pathish = cleaned.find({'/', '?', '#'})
+  pathish >= 0 and pathish < schemeEnd
+
+proc isSafeMarkdownSrc*(url: string): bool =
+  ## Returns true for http, https, or relative image URLs.
+  let cleaned = normalizeMarkdownUrl(url)
+  if cleaned.len == 0:
+    return true
+  if cleaned.startsWith("http://") or
+    cleaned.startsWith("https://") or
+    cleaned.startsWith("//"):
+    return true
+  let schemeEnd = cleaned.find(':')
+  if schemeEnd < 0:
+    return true
+  let pathish = cleaned.find({'/', '?', '#'})
+  pathish >= 0 and pathish < schemeEnd
+
+proc replaceUnsafeAttrUrls(html: string, attr: string, allowMailto: bool): string =
+  ## Rewrites one quoted HTML attribute to drop unsafe URLs.
+  let needle = attr & "=\""
+  var i = 0
+  while true:
+    let startAt = html.find(needle, i)
+    if startAt < 0:
+      result.add(html[i .. ^1])
+      break
+    result.add(html[i ..< startAt])
+    let valueStart = startAt + needle.len
+    let valueEnd = html.find('"', valueStart)
+    if valueEnd < 0:
+      result.add(html[startAt .. ^1])
+      break
+    let url = html[valueStart ..< valueEnd]
+    result.add(needle)
+    let safe =
+      if allowMailto:
+        isSafeMarkdownHref(url)
+      else:
+        isSafeMarkdownSrc(url)
+    if safe:
+      result.add(url)
+    else:
+      result.add("#")
+    result.add('"')
+    i = valueEnd + 1
+
+proc sanitizeMarkdownHtml*(html: string): string =
+  ## Neutralizes javascript and other unsafe URL schemes in HTML.
+  result = replaceUnsafeAttrUrls(html, "href", true)
+  result = replaceUnsafeAttrUrls(result, "src", false)
+
+proc renderSafeMarkdown*(text: string): string =
+  ## Renders GFM markdown with HTML escaped and unsafe URLs removed.
+  sanitizeMarkdownHtml(
+    markdown(
+      text,
+      config = initGfmConfig(
+        escape = true,
+        keepHtml = false
+      )
+    )
+  )
 
 proc renderCsrfField*(csrfToken: string): string =
   ## Renders a hidden CSRF input for POST forms.
