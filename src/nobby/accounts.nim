@@ -1,5 +1,5 @@
 import
-  std/[os, random, strutils, sysrand],
+  std/[os, strutils, sysrand],
   markdown,
   crunchy/sha256,
   debby/[pools, sqlite],
@@ -14,9 +14,6 @@ const
   TokenBytes = 24
   ServerSecretPath* = "server.secret"
   ServerSecretBytes = 32
-
-var
-  rngInit {.threadvar.}: bool
 
 proc nowEpoch*(): int64
 proc syncUserCounters*(pool: Pool)
@@ -189,23 +186,17 @@ proc syncUserCounters*(pool: Pool) =
         user.postCount = postCount
         user.updatedAt = nowEpoch()
         db.update(user)
-proc ensureRandom() =
-  ## Initializes thread-local random source once.
-  if not rngInit:
-    randomize()
-    rngInit = true
-
-proc randomHex(bytesLen: int): string =
-  ## Generates a random lowercase hex string with the requested byte size.
-  ensureRandom()
-  for _ in 0 ..< bytesLen:
-    result.add(toHex(rand(255), 2).toLowerAscii())
-
-proc bytesToHex(bytes: array[32, uint8]): string =
-  ## Encodes 32 bytes as lowercase hex.
-  result = ""
+proc bytesToHex(bytes: openArray[byte]): string =
+  ## Encodes bytes as lowercase hex.
   for b in bytes:
     result.add(toHex(b.int, 2).toLowerAscii())
+
+proc randomHex(bytesLen: int): string =
+  ## Generates a cryptographically random lowercase hex string.
+  var bytes = newSeq[byte](bytesLen)
+  if not urandom(bytes):
+    raise newException(IOError, "Failed to generate random bytes.")
+  bytesToHex(bytes)
 
 proc hexValue(c: char): int =
   ## Parses one hex character into its numeric value.
@@ -238,11 +229,7 @@ proc makePasswordToken*(): string =
 
 proc makeServerSecretValue(): string =
   ## Generates one cryptographically random server secret as hex.
-  var bytes = newSeq[byte](ServerSecretBytes)
-  if not urandom(bytes):
-    raise newException(IOError, "Failed to generate server secret.")
-  for b in bytes:
-    result.add(toHex(b.int, 2).toLowerAscii())
+  randomHex(ServerSecretBytes)
 
 proc loadServerSecret*(path = ServerSecretPath): string =
   ## Loads password pepper from env, or a local secret file.
