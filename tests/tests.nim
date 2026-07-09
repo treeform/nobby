@@ -431,18 +431,6 @@ proc main() =
   doAssert accountName in authTopicHtml, "Logged-in username not used for posting."
   doAssert "SpoofAuthorShouldNotAppear" notin authTopicHtml, "Form author should be ignored while logged in."
 
-  echo "Testing logout and guest posting attribution."
-  let logoutRes = postFormWithHeaders(curl, "/logout", @[
-    ("csrf", csrfToken)
-  ], authHeaders)
-  doAssert logoutRes.code in [200, 302, 405], "Logout request failed."
-  let guestTopicCreate = postMultipartForm(curl, boardPath & "/new", @[
-    ("author", "GuestAfterLogout"),
-    ("title", "E2E guest topic"),
-    ("body", "E2E guest topic body")
-  ])
-  doAssert guestTopicCreate.code == 401, "Guest topic create should be blocked."
-
   echo "Testing forgot-password and reset-password flow."
   let forgotPasswordRes = postForm(curl, "/forgot-password", @[
     ("email", accountEmail)
@@ -462,12 +450,20 @@ proc main() =
     doAssert resetRows.len == 1 and resetRows[0].len > 0, "No password reset token was generated."
     resetToken = resetRows[0][0]
 
+  let stillAuthedBeforeReset = curl.get(BaseUrl & boardPath, authHeaders).body
+  doAssert "You must be logged in to post." notin stillAuthedBeforeReset,
+    "Old session should still work before password reset."
+
   let resetRes = postForm(curl, "/reset-password", @[
     ("token", resetToken),
     ("password", secondPassword),
     ("repeatPassword", secondPassword)
   ])
   doAssert resetRes.code in [200, 302, 405], "Reset-password request failed."
+
+  let oldSessionAfterReset = curl.get(BaseUrl & boardPath, authHeaders).body
+  doAssert "You must be logged in to post." in oldSessionAfterReset,
+    "Password reset should revoke existing sessions."
 
   let oldLogin = postForm(curl, "/login", @[
     ("username", accountName),
@@ -481,6 +477,28 @@ proc main() =
     ("password", secondPassword)
   ])
   doAssert newLogin.code in [200, 302, 405], "New password login failed."
+  let newSessionCookie = extractNamedCookie(newLogin.headers, "nobby_session")
+  doAssert newSessionCookie.startsWith("nobby_session="), "New login should return a session cookie."
+  var newAuthHeaders: HttpHeaders
+  newAuthHeaders["Cookie"] = newSessionCookie
+
+  echo "Testing logout and guest posting attribution."
+  let logoutPage = curl.get(BaseUrl & boardPath, newAuthHeaders)
+  let logoutCsrf = extractInputValue(logoutPage.body, "csrf")
+  doAssert logoutCsrf.len > 0, "Logged-in board page should include csrf for logout."
+  let logoutCsrfCookie = extractNamedCookie(logoutPage.headers, "nobby_csrf")
+  if logoutCsrfCookie.len > 0:
+    newAuthHeaders["Cookie"] = mergeCookieHeader(newAuthHeaders["Cookie"], logoutCsrfCookie)
+  let logoutRes = postFormWithHeaders(curl, "/logout", @[
+    ("csrf", logoutCsrf)
+  ], newAuthHeaders)
+  doAssert logoutRes.code in [200, 302, 405], "Logout request failed."
+  let guestTopicCreate = postMultipartForm(curl, boardPath & "/new", @[
+    ("author", "GuestAfterLogout"),
+    ("title", "E2E guest topic"),
+    ("body", "E2E guest topic body")
+  ])
+  doAssert guestTopicCreate.code == 401, "Guest topic create should be blocked."
 
   echo "Testing forgot-username flow."
   let forgotUsernameRes = postForm(curl, "/forgot-username", @[

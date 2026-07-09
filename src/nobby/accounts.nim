@@ -363,6 +363,23 @@ proc clearSession*(pool: Pool, token: string) =
   pool.withDb:
     discard db.query("DELETE FROM user_session WHERE token = ?", token)
 
+proc clearSessionsForUser*(pool: Pool, userId: int) =
+  ## Deletes all session tokens for one user.
+  if userId <= 0:
+    return
+  pool.withDb:
+    discard db.query("DELETE FROM user_session WHERE user_id = ?", userId)
+
+proc clearUnusedPasswordResetTokens*(pool: Pool, userId: int) =
+  ## Deletes unused password reset tokens for one user.
+  if userId <= 0:
+    return
+  pool.withDb:
+    discard db.query(
+      "DELETE FROM password_reset_token WHERE user_id = ? AND used_at = 0",
+      userId
+    )
+
 proc getCurrentUser*(pool: Pool, request: Request): AccountUser =
   ## Resolves current signed-in user from request session cookie.
   let token = request.sessionCookieValue()
@@ -462,13 +479,15 @@ proc setUserPassword*(
   user: AccountUser,
   password: string
 ) =
-  ## Replaces a user's password hash fields.
+  ## Replaces a user's password hash and revokes existing sessions.
   let salt = makePasswordSalt()
   user.passwordSalt = salt
   user.passwordHash = makePasswordHash(serverSecret, user.username, password, salt)
   user.passwordIterations = DefaultPasswordIterations
   user.updatedAt = nowEpoch()
   pool.update(user)
+  pool.clearSessionsForUser(user.id)
+  pool.clearUnusedPasswordResetTokens(user.id)
 
 proc incrementThreadAndPostCount*(pool: Pool, user: AccountUser) =
   ## Increments both thread and post counters after creating a thread.
