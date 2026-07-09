@@ -48,12 +48,6 @@ type
   CountRow = ref object
     count: int
 
-  LastPostRow = ref object
-    createdAt: int64
-    authorName: string
-    topicId: int
-    topicTitle: string
-
   BoardStatsRow = ref object
     id: int
     section: string
@@ -177,44 +171,6 @@ proc countTopicsByBoard*(pool: Pool, boardId: int): int =
     boardId
   ))
 
-proc countPostsByBoard*(pool: Pool, boardId: int): int =
-  ## Counts all posts in all topics for one board.
-  countValue(pool.query(
-    CountRow,
-    """
-    SELECT COUNT(*) AS count
-    FROM post p
-    JOIN topic t ON p.topic_id = t.id
-    WHERE t.board_id = ?
-    """,
-    boardId
-  ))
-
-proc getLastPostByBoard*(pool: Pool, boardId: int): BoardLastPost =
-  ## Returns latest post metadata for one board.
-  let rows = pool.query(
-    LastPostRow,
-    """
-    SELECT
-      p.created_at AS created_at,
-      p.author_name AS author_name,
-      t.id AS topic_id,
-      t.title AS topic_title
-    FROM post p
-    JOIN topic t ON p.topic_id = t.id
-    WHERE t.board_id = ?
-    ORDER BY p.created_at DESC, p.id DESC
-    LIMIT 1
-    """,
-    boardId
-  )
-  if rows.len == 0:
-    return
-  result.createdAt = rows[0].createdAt
-  result.authorName = rows[0].authorName
-  result.topicId = rows[0].topicId
-  result.topicTitle = rows[0].topicTitle
-
 proc listBoardStats*(pool: Pool): seq[BoardStats] =
   ## Lists boards with topic/post counts and last post in one query.
   let rows = pool.query(
@@ -284,25 +240,6 @@ proc listBoardStats*(pool: Pool): seq[BoardStats] =
       postCount: row.postCount,
       lastPost: lastPost
     ))
-
-proc listTopicsByBoard*(
-  pool: Pool,
-  boardId: int,
-  page = 1,
-  pageSize = 30
-): seq[Topic] =
-  ## Lists paged topics sorted by latest activity.
-  let
-    safePage = max(1, page)
-    safePageSize = max(1, pageSize)
-    offset = (safePage - 1) * safePageSize
-  pool.query(
-    Topic,
-    "SELECT * FROM topic WHERE board_id = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
-    boardId,
-    safePageSize,
-    offset
-  )
 
 proc listTopicStatsByBoard*(
   pool: Pool,

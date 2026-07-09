@@ -99,13 +99,6 @@ proc formValue(form: seq[(string, string)], key: string): string =
     if k == key:
       return v
 
-proc cleanAuthor(value: string): string =
-  ## Normalizes author name and falls back to Anonymous.
-  result = value.strip()
-  if result.len == 0:
-    return "Anonymous"
-  result = truncateUtf8(result, 60)
-
 proc cleanTitle(value: string): string =
   ## Normalizes topic title.
   truncateUtf8(value.strip(), 180)
