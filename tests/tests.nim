@@ -299,6 +299,22 @@ proc main() =
   doAssert "href=\"/b/main\"" in relativeHtml,
     "Relative links should remain."
 
+  echo "Testing SQLite WAL and busy lock helpers."
+  let walPool = newForumPool(tempRoot / "wal.db", 2)
+  initSchema(walPool)
+  initAccountsSchema(walPool)
+  walPool.withDb:
+    let modeRows = db.query("PRAGMA journal_mode")
+    doAssert modeRows.len == 1 and modeRows[0][0].toLowerAscii() == "wal",
+      "Forum pool should enable WAL mode."
+    let busyRows = db.query("PRAGMA busy_timeout")
+    doAssert busyRows.len == 1 and busyRows[0][0] == "5000",
+      "Forum pool should set busy_timeout to 5000ms."
+  doAssert isBusyLockError(newException(DbError, "SQLite: database is locked")),
+    "Locked errors should be detected as busy."
+  doAssert not isBusyLockError(newException(DbError, "UNIQUE constraint failed")),
+    "Unique errors should not be treated as busy."
+
   var server = startProcess(
     command = tempServerExe,
     workingDir = tempRoot,

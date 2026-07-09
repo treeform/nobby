@@ -405,7 +405,8 @@ proc createSession*(pool: Pool, userId: int, ttlSeconds = 60 * 60 * 24 * 30): Us
     expiresAt: nowEpoch() + int64(ttlSeconds),
     createdAt: nowEpoch()
   )
-  pool.insert(result)
+  withBusyRetry:
+    pool.insert(result)
 
 proc clearSession*(pool: Pool, token: string) =
   ## Deletes one session token if it exists.
@@ -479,7 +480,8 @@ proc createUser*(
     updatedAt: ts
   )
   try:
-    pool.insert(result)
+    withBusyRetry:
+      pool.insert(result)
   except DbError as e:
     if isUniqueConstraintError(e):
       raise e
@@ -520,7 +522,8 @@ proc createPasswordResetToken*(
     usedAt: 0,
     createdAt: nowEpoch()
   )
-  pool.insert(result)
+  withBusyRetry:
+    pool.insert(result)
 
 proc consumePasswordResetToken*(
   pool: Pool,
@@ -535,7 +538,8 @@ proc consumePasswordResetToken*(
   if token.expiresAt <= nowEpoch():
     return nil
   token.usedAt = nowEpoch()
-  pool.update(token)
+  withBusyRetry:
+    pool.update(token)
   token
 
 proc setUserPassword*(
@@ -550,7 +554,8 @@ proc setUserPassword*(
   user.passwordHash = makePasswordHash(serverSecret, user.username, password, salt)
   user.passwordIterations = DefaultPasswordIterations
   user.updatedAt = nowEpoch()
-  pool.update(user)
+  withBusyRetry:
+    pool.update(user)
   pool.clearSessionsForUser(user.id)
   pool.clearUnusedPasswordResetTokens(user.id)
 
@@ -561,7 +566,8 @@ proc incrementThreadAndPostCount*(pool: Pool, user: AccountUser) =
   user.threadCount += 1
   user.postCount += 1
   user.updatedAt = nowEpoch()
-  pool.update(user)
+  withBusyRetry:
+    pool.update(user)
 
 proc incrementPostCount*(pool: Pool, user: AccountUser) =
   ## Increments post counter after adding a reply.
@@ -569,7 +575,8 @@ proc incrementPostCount*(pool: Pool, user: AccountUser) =
     return
   user.postCount += 1
   user.updatedAt = nowEpoch()
-  pool.update(user)
+  withBusyRetry:
+    pool.update(user)
 
 proc updateUserProfile*(pool: Pool, user: AccountUser, statusText: string, bioText: string) =
   ## Updates editable profile fields for one user.
@@ -578,7 +585,8 @@ proc updateUserProfile*(pool: Pool, user: AccountUser, statusText: string, bioTe
   user.userStatus = cleanUserStatus(statusText)
   user.userBio = cleanUserBio(bioText)
   user.updatedAt = nowEpoch()
-  pool.update(user)
+  withBusyRetry:
+    pool.update(user)
 
 proc renderAccountLayout*(
   pageTitle: string,

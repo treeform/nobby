@@ -1,5 +1,5 @@
 import
-  std/times,
+  std/[os, strutils, times],
   debby/[pools, sqlite]
 
 type
@@ -90,11 +90,45 @@ proc countValue(rows: seq[CountRow]): int =
   if rows.len > 0:
     return rows[0].count
 
+proc configureSqlite*(db: Db) =
+  ## Enables WAL and a busy timeout for concurrent writers.
+  discard db.query("PRAGMA journal_mode = WAL")
+  discard db.query("PRAGMA busy_timeout = 5000")
+  discard db.query("PRAGMA synchronous = NORMAL")
+
+const
+  BusyRetryAttempts = 5
+  BusyRetryBaseMs = 15
+
+proc isBusyLockError*(e: ref Exception): bool =
+  ## Returns true when an exception looks like a transient SQLite lock.
+  let msg = e.msg.toLowerAscii()
+  "database is locked" in msg or
+    "database is busy" in msg or
+    "sqlite_busy" in msg or
+    "sqlite_locked" in msg
+
+template withBusyRetry*(body: untyped) =
+  ## Retries a DB write a few times on transient SQLite lock errors.
+  block:
+    var attempt = 0
+    while true:
+      inc attempt
+      try:
+        body
+        break
+      except DbError as e:
+        if not isBusyLockError(e) or attempt >= BusyRetryAttempts:
+          raise
+        sleep(BusyRetryBaseMs * attempt)
+
 proc newForumPool*(dbPath = "forum.db", poolSize = 10): Pool =
   ## Creates a DB pool for forum requests.
   result = newPool()
   for i in 0 ..< poolSize:
-    result.add(openDatabase(dbPath))
+    let db = openDatabase(dbPath)
+    configureSqlite(db)
+    result.add(db)
 
 proc initSchema*(pool: Pool) =
   ## Creates forum tables and indexes if needed.
@@ -306,7 +340,8 @@ proc setTopicLocked*(pool: Pool, topic: Topic, locked: bool) =
   if topic.isNil:
     return
   topic.locked = locked
-  pool.update(topic)
+  withBusyRetry:
+    pool.update(topic)
 
 proc countPostsByTopic*(pool: Pool, topicId: int): int =
   ## Counts posts in a topic.
@@ -344,23 +379,24 @@ proc createTopicWithFirstPost*(
   createdAt: int64
 ): Topic =
   ## Creates topic and first post in one transaction.
-  pool.withDb:
-    db.withTransaction:
-      result = Topic(
-        boardId: boardId,
-        title: title,
-        authorName: authorName,
-        createdAt: createdAt,
-        updatedAt: createdAt
-      )
-      db.insert(result)
-      var post = Post(
-        topicId: result.id,
-        authorName: authorName,
-        body: body,
-        createdAt: createdAt
-      )
-      db.insert(post)
+  withBusyRetry:
+    pool.withDb:
+      db.withTransaction:
+        result = Topic(
+          boardId: boardId,
+          title: title,
+          authorName: authorName,
+          createdAt: createdAt,
+          updatedAt: createdAt
+        )
+        db.insert(result)
+        var post = Post(
+          topicId: result.id,
+          authorName: authorName,
+          body: body,
+          createdAt: createdAt
+        )
+        db.insert(post)
 
 proc createReply*(
   pool: Pool,
@@ -370,17 +406,18 @@ proc createReply*(
   createdAt: int64
 ): Post =
   ## Creates a reply and bumps topic updated time.
-  pool.withDb:
-    var topic = db.get(Topic, topicId)
-    if topic.isNil:
-      return nil
-    db.withTransaction:
-      result = Post(
-        topicId: topicId,
-        authorName: authorName,
-        body: body,
-        createdAt: createdAt
-      )
-      db.insert(result)
-      topic.updatedAt = createdAt
-      db.update(topic)
+  withBusyRetry:
+    pool.withDb:
+      var topic = db.get(Topic, topicId)
+      if topic.isNil:
+        return nil
+      db.withTransaction:
+        result = Post(
+          topicId: topicId,
+          authorName: authorName,
+          body: body,
+          createdAt: createdAt
+        )
+        db.insert(result)
+        topic.updatedAt = createdAt
+        db.update(topic)
