@@ -3,7 +3,7 @@ import
   debby/[pools, sqlite],
   webby,
   curly,
-  ../src/nobby/[accounts, models]
+  ../src/nobby/[accounts, models, utils]
 
 const
   BaseUrl = "http://localhost:8080"
@@ -249,6 +249,19 @@ proc main() =
   except ValueError:
     invalidCreateRaised = true
   doAssert invalidCreateRaised, "createUser should raise ValueError for bad usernames."
+
+  echo "Testing UTF-8 safe truncation."
+  let midRune = "a" & "日"
+  doAssert midRune.len == 4, "Expected one ASCII byte plus a 3-byte rune."
+  let cut = truncateUtf8(midRune, 2)
+  doAssert cut == "a", "Mid-rune cut should drop the partial rune."
+  doAssert cut.len == 1, "Truncated result should be valid UTF-8."
+  doAssert cleanUserStatus("x".repeat(141) & "日") == "x".repeat(140),
+    "cleanUserStatus should truncate on a byte boundary."
+  doAssert cleanUserBio("日".repeat(2000)).len <= 4000,
+    "cleanUserBio should stay within the byte budget."
+  doAssert cleanUserBio("日".repeat(2000)).len mod 3 == 0,
+    "cleanUserBio should not split a 3-byte rune."
 
   var server = startProcess(
     command = tempServerExe,

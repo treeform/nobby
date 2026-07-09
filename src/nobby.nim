@@ -2,7 +2,7 @@ import
   std/strutils,
   webby,
   mummy, mummy/routers,
-  nobby/[accounts, models, pages]
+  nobby/[accounts, models, pages, utils]
 const
   PageSize = 20
   ForumCss = staticRead("../data/style.css")
@@ -18,7 +18,7 @@ proc parsePositiveInt(value: string): int =
     result = value.parseInt()
     if result < 1:
       result = 0
-  except:
+  except ValueError:
     result = 0
 
 let serverSecretValue = loadServerSecret()
@@ -104,20 +104,15 @@ proc cleanAuthor(value: string): string =
   result = value.strip()
   if result.len == 0:
     return "Anonymous"
-  if result.len > 60:
-    result = result[0 .. 59]
+  result = truncateUtf8(result, 60)
 
 proc cleanTitle(value: string): string =
   ## Normalizes topic title.
-  result = value.strip()
-  if result.len > 180:
-    result = result[0 .. 179]
+  truncateUtf8(value.strip(), 180)
 
 proc cleanBody(value: string): string =
   ## Normalizes post body.
-  result = value.strip()
-  if result.len > 12000:
-    result = result[0 .. 11999]
+  truncateUtf8(value.strip(), 12000)
 
 proc hasMinPostLines(value: string, minLines = 4): bool =
   ## Ensures a post has at least the required count of non-empty lines.

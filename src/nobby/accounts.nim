@@ -189,15 +189,11 @@ proc listUserStats*(
 
 proc cleanUserStatus*(value: string): string =
   ## Normalizes short user status line.
-  result = value.strip()
-  if result.len > 140:
-    result = result[0 .. 139]
+  truncateUtf8(value.strip(), 140)
 
 proc cleanUserBio*(value: string): string =
   ## Normalizes profile biography text.
-  result = value.strip()
-  if result.len > 4000:
-    result = result[0 .. 3999]
+  truncateUtf8(value.strip(), 4000)
 
 proc syncUserCounters*(pool: Pool) =
   ## Recomputes per-user counters from topic/post author data.

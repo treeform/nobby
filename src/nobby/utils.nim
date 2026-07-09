@@ -15,6 +15,17 @@ proc esc*(text: string): string =
   result = result.replace(">", "&gt;")
   result = result.replace("\"", "&quot;")
 
+proc truncateUtf8*(s: string, maxBytes: int): string =
+  ## Truncates to at most maxBytes without splitting a UTF-8 rune.
+  if maxBytes <= 0:
+    return ""
+  if s.len <= maxBytes:
+    return s
+  var endAt = maxBytes
+  while endAt > 0 and (ord(s[endAt]) and 0xC0) == 0x80:
+    dec endAt
+  s[0 ..< endAt]
+
 proc renderCsrfField*(csrfToken: string): string =
   ## Renders a hidden CSRF input for POST forms.
   renderFragment:
