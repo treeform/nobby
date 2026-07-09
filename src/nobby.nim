@@ -1,5 +1,5 @@
 import
-  std/[os, strutils],
+  std/strutils,
   webby,
   mummy, mummy/routers,
   nobby/[accounts, models, pages]
@@ -21,9 +21,12 @@ proc parsePositiveInt(value: string): int =
   except:
     result = 0
 
-proc serverSecret(): string =
-  ## Loads server password pepper from environment.
-  getEnv("NOBBY_SERVER_SECRET", "nobby-dev-secret-change-me")
+let serverSecretValue = loadServerSecret()
+
+proc serverSecret(): string {.gcsafe.} =
+  ## Returns the loaded password pepper for this process.
+  {.cast(gcsafe).}:
+    result = serverSecretValue
 
 proc pageFromUri(rawUri: string): int =
   ## Reads optional page query from URI using webby parser.

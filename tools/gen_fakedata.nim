@@ -1,5 +1,5 @@
 import
-  std/[os, sets, strutils],
+  std/[sets, strutils],
   debby/pools,
   debby/sqlite,
   ../src/nobby/[accounts, models]
@@ -445,7 +445,7 @@ proc makeSeeds(): seq[SeedBoard] =
   ]
 proc main() =
   ## Generates fake forum data for local visual testing.
-  let serverSecret = getEnv("NOBBY_SERVER_SECRET", "nobby-dev-secret-change-me")
+  let serverSecret = loadServerSecret()
   let pool = newForumPool("forum.db", 2)
   pool.initSchema()
   pool.initAccountsSchema()

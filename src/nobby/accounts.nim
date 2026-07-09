@@ -1,5 +1,5 @@
 import
-  std/[random, strutils],
+  std/[os, random, strutils, sysrand],
   markdown,
   crunchy/sha256,
   debby/[pools, sqlite],
@@ -12,6 +12,8 @@ const
   DefaultPasswordIterations* = 120_000
   SaltBytes = 16
   TokenBytes = 24
+  ServerSecretPath* = "server.secret"
+  ServerSecretBytes = 32
 
 var
   rngInit {.threadvar.}: bool
@@ -233,6 +235,31 @@ proc makePasswordSalt*(): string =
 proc makePasswordToken*(): string =
   ## Generates one account token value as hex.
   randomHex(TokenBytes)
+
+proc makeServerSecretValue(): string =
+  ## Generates one cryptographically random server secret as hex.
+  var bytes = newSeq[byte](ServerSecretBytes)
+  if not urandom(bytes):
+    raise newException(IOError, "Failed to generate server secret.")
+  for b in bytes:
+    result.add(toHex(b.int, 2).toLowerAscii())
+
+proc loadServerSecret*(path = ServerSecretPath): string =
+  ## Loads password pepper from env, or a local secret file.
+  ## Creates the secret file with owner-only permissions when missing.
+  result = getEnv("NOBBY_SERVER_SECRET").strip()
+  if result.len > 0:
+    return
+  if fileExists(path):
+    result = readFile(path).strip()
+    if result.len == 0:
+      raise newException(IOError, "Server secret file is empty: " & path)
+    return
+  result = makeServerSecretValue()
+  writeFile(path, result & "\n")
+  when defined(posix):
+    setFilePermissions(path, {fpUserRead, fpUserWrite})
+  stderr.writeLine("[secret] Created ", path)
 
 proc makePasswordHash*(
   serverSecret: string,
