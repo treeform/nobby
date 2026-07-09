@@ -141,6 +141,24 @@ proc extractInputValue(html: string, fieldName: string): string =
     return ""
   html[valueStart ..< valueEnd]
 
+proc loadGuestCsrf(
+  client: Curly,
+  path: string,
+  headers: var HttpHeaders
+): string =
+  ## Loads a CSRF token from a guest page and stores the cookie.
+  let page = client.get(BaseUrl & path, headers)
+  result = extractInputValue(page.body, "csrf")
+  doAssert result.len > 0, "Missing csrf field on " & path
+  let csrfCookie = extractNamedCookie(page.headers, "nobby_csrf")
+  if csrfCookie.len > 0:
+    if "Cookie" in headers:
+      headers["Cookie"] = mergeCookieHeader(headers["Cookie"], csrfCookie)
+    else:
+      headers["Cookie"] = csrfCookie
+  doAssert "Cookie" in headers and "nobby_csrf=" in headers["Cookie"],
+    "Missing nobby_csrf cookie after loading " & path
+
 proc main() =
   ## Runs an integration smoke test against key forum flows.
   let repoRoot = getCurrentDir()
@@ -318,48 +336,67 @@ proc main() =
   let accountEmail = accountName & "@example.com"
   let firstPassword = "Passw0rdOne!"
   let secondPassword = "Passw0rdTwo!"
-  let registerRes = postForm(curl, "/register", @[
+  var guestHeaders: HttpHeaders
+  let registerWithoutCsrf = postForm(curl, "/register", @[
+    ("username", accountName & "_nocsrf"),
+    ("email", accountName & "_nocsrf@example.com"),
+    ("password", firstPassword),
+    ("repeatPassword", firstPassword)
+  ])
+  doAssert registerWithoutCsrf.code == 403,
+    "Register without csrf should be rejected."
+  let registerCsrf = loadGuestCsrf(curl, "/register", guestHeaders)
+  let registerRes = postFormWithHeaders(curl, "/register", @[
+    ("csrf", registerCsrf),
     ("username", accountName),
     ("email", accountEmail),
     ("password", firstPassword),
     ("repeatPassword", firstPassword)
-  ])
+  ], guestHeaders)
   doAssert registerRes.code in [200, 302, 405],
     "Register request failed with code " & $registerRes.code & ". Body:\n" & registerRes.body
-  let unicodeNameRes = postForm(curl, "/register", @[
+  let unicodeCsrf = loadGuestCsrf(curl, "/register", guestHeaders)
+  let unicodeNameRes = postFormWithHeaders(curl, "/register", @[
+    ("csrf", unicodeCsrf),
     ("username", "usérname"),
     ("email", "unicode_" & accountEmail),
     ("password", firstPassword),
     ("repeatPassword", firstPassword)
-  ])
+  ], guestHeaders)
   doAssert unicodeNameRes.code == 400, "Unicode username should be rejected."
   doAssert "ASCII letters" in unicodeNameRes.body,
     "Unicode username should return ASCII validation error."
-  let spacedNameRes = postForm(curl, "/register", @[
+  let spacedCsrf = loadGuestCsrf(curl, "/register", guestHeaders)
+  let spacedNameRes = postFormWithHeaders(curl, "/register", @[
+    ("csrf", spacedCsrf),
     ("username", "bad name"),
     ("email", "space_" & accountEmail),
     ("password", firstPassword),
     ("repeatPassword", firstPassword)
-  ])
+  ], guestHeaders)
   doAssert spacedNameRes.code == 400, "Spaced username should be rejected."
   doAssert "ASCII letters" in spacedNameRes.body,
     "Spaced username should return ASCII validation error."
   let caseVariantName = accountName[0].toUpperAscii() & accountName[1 .. ^1]
-  let caseVariantRes = postForm(curl, "/register", @[
+  let caseCsrf = loadGuestCsrf(curl, "/register", guestHeaders)
+  let caseVariantRes = postFormWithHeaders(curl, "/register", @[
+    ("csrf", caseCsrf),
     ("username", caseVariantName),
     ("email", "variant_" & accountEmail),
     ("password", firstPassword),
     ("repeatPassword", firstPassword)
-  ])
+  ], guestHeaders)
   doAssert caseVariantRes.code == 400, "Case-variant username should be rejected."
   doAssert "Username is already taken." in caseVariantRes.body,
     "Case-variant username should return username taken error."
-  let duplicateEmailRes = postForm(curl, "/register", @[
+  let dupCsrf = loadGuestCsrf(curl, "/register", guestHeaders)
+  let duplicateEmailRes = postFormWithHeaders(curl, "/register", @[
+    ("csrf", dupCsrf),
     ("username", accountName & "_dup"),
     ("email", accountEmail),
     ("password", firstPassword),
     ("repeatPassword", firstPassword)
-  ])
+  ], guestHeaders)
   doAssert duplicateEmailRes.code == 400, "Duplicate email should be rejected."
   doAssert "Email is already registered." in duplicateEmailRes.body,
     "Duplicate email should return email registered error."
@@ -401,17 +438,26 @@ proc main() =
     doAssert uniqueInsertFailed, "Raw duplicate email insert should hit UNIQUE constraint."
 
   echo "Testing login validation."
-  let badLogin = postForm(curl, "/login", @[
-    ("username", accountName),
-    ("password", "NotTheRightPassword")
-  ])
-  doAssert badLogin.code in [401, 200], "Bad login should be rejected."
-  doAssert "Invalid username or password." in badLogin.body, "Bad login message missing."
-
-  let goodLogin = postForm(curl, "/login", @[
+  let loginWithoutCsrf = postForm(curl, "/login", @[
     ("username", accountName),
     ("password", firstPassword)
   ])
+  doAssert loginWithoutCsrf.code == 403, "Login without csrf should be rejected."
+  let badLoginCsrf = loadGuestCsrf(curl, "/login", guestHeaders)
+  let badLogin = postFormWithHeaders(curl, "/login", @[
+    ("csrf", badLoginCsrf),
+    ("username", accountName),
+    ("password", "NotTheRightPassword")
+  ], guestHeaders)
+  doAssert badLogin.code in [401, 200], "Bad login should be rejected."
+  doAssert "Invalid username or password." in badLogin.body, "Bad login message missing."
+
+  let goodLoginCsrf = loadGuestCsrf(curl, "/login", guestHeaders)
+  let goodLogin = postFormWithHeaders(curl, "/login", @[
+    ("csrf", goodLoginCsrf),
+    ("username", accountName),
+    ("password", firstPassword)
+  ], guestHeaders)
   doAssert goodLogin.code in [200, 302, 405], "Good login failed."
   var sessionSetCookie = ""
   for (key, value) in goodLogin.headers:
@@ -470,6 +516,24 @@ proc main() =
   ], authHeaders)
   doAssert editWithoutCsrf.code == 403, "Profile edit without csrf should be rejected."
 
+  let forgotWithoutCsrf = postForm(curl, "/forgot-password", @[
+    ("email", accountEmail)
+  ])
+  doAssert forgotWithoutCsrf.code == 403,
+    "Forgot-password without csrf should be rejected."
+  let resetWithoutCsrf = postForm(curl, "/reset-password", @[
+    ("token", "unused"),
+    ("password", secondPassword),
+    ("repeatPassword", secondPassword)
+  ])
+  doAssert resetWithoutCsrf.code == 403,
+    "Reset-password without csrf should be rejected."
+  let forgotUsernameWithoutCsrf = postForm(curl, "/forgot-username", @[
+    ("email", accountEmail)
+  ])
+  doAssert forgotUsernameWithoutCsrf.code == 403,
+    "Forgot-username without csrf should be rejected."
+
   let csrfBootstrap = curl.get(BaseUrl & boardPath, authHeaders)
   let csrfToken = extractInputValue(csrfBootstrap.body, "csrf")
   doAssert csrfToken.len > 0, "Could not load csrf token for authenticated posts."
@@ -481,12 +545,14 @@ proc main() =
 
   let otherAccountName = accountName & "_other"
   let otherAccountEmail = otherAccountName & "@example.com"
-  let otherRegisterRes = postForm(curl, "/register", @[
+  let otherRegisterCsrf = loadGuestCsrf(curl, "/register", guestHeaders)
+  let otherRegisterRes = postFormWithHeaders(curl, "/register", @[
+    ("csrf", otherRegisterCsrf),
     ("username", otherAccountName),
     ("email", otherAccountEmail),
     ("password", firstPassword),
     ("repeatPassword", firstPassword)
-  ])
+  ], guestHeaders)
   doAssert otherRegisterRes.code in [200, 302, 405], "Second account register failed."
 
   echo "Testing user profile page and edit flow."
@@ -641,10 +707,13 @@ proc main() =
   doAssert "SpoofAuthorShouldNotAppear" notin authTopicHtml, "Form author should be ignored while logged in."
 
   echo "Testing topic lock and hot icons."
-  let otherLogin = postForm(curl, "/login", @[
+  var otherGuestHeaders: HttpHeaders
+  let otherLoginCsrf = loadGuestCsrf(curl, "/login", otherGuestHeaders)
+  let otherLogin = postFormWithHeaders(curl, "/login", @[
+    ("csrf", otherLoginCsrf),
     ("username", otherAccountName),
     ("password", firstPassword)
-  ])
+  ], otherGuestHeaders)
   doAssert otherLogin.code in [200, 302, 405], "Other account login failed."
   let otherSessionCookie = extractNamedCookie(otherLogin.headers, "nobby_session")
   doAssert otherSessionCookie.startsWith("nobby_session="), "Other login missing session."
@@ -697,9 +766,11 @@ proc main() =
   doAssert "topic-hot.svg" in boardAfterHot, "Recently active topic should use hot icon."
 
   echo "Testing forgot-password and reset-password flow."
-  let forgotPasswordRes = postForm(curl, "/forgot-password", @[
+  let forgotCsrf = loadGuestCsrf(curl, "/forgot-password", guestHeaders)
+  let forgotPasswordRes = postFormWithHeaders(curl, "/forgot-password", @[
+    ("csrf", forgotCsrf),
     ("email", accountEmail)
-  ])
+  ], guestHeaders)
   doAssert forgotPasswordRes.code == 200, "Forgot-password request should succeed."
   doAssert "If that email exists, a reset message was sent." in forgotPasswordRes.body,
     "Forgot-password confirmation missing."
@@ -719,28 +790,38 @@ proc main() =
   doAssert "You must be logged in to post." notin stillAuthedBeforeReset,
     "Old session should still work before password reset."
 
-  let resetRes = postForm(curl, "/reset-password", @[
+  let resetCsrf = loadGuestCsrf(
+    curl,
+    "/reset-password?token=" & resetToken,
+    guestHeaders
+  )
+  let resetRes = postFormWithHeaders(curl, "/reset-password", @[
+    ("csrf", resetCsrf),
     ("token", resetToken),
     ("password", secondPassword),
     ("repeatPassword", secondPassword)
-  ])
+  ], guestHeaders)
   doAssert resetRes.code in [200, 302, 405], "Reset-password request failed."
 
   let oldSessionAfterReset = curl.get(BaseUrl & boardPath, authHeaders).body
   doAssert "You must be logged in to post." in oldSessionAfterReset,
     "Password reset should revoke existing sessions."
 
-  let oldLogin = postForm(curl, "/login", @[
+  let oldLoginCsrf = loadGuestCsrf(curl, "/login", guestHeaders)
+  let oldLogin = postFormWithHeaders(curl, "/login", @[
+    ("csrf", oldLoginCsrf),
     ("username", accountName),
     ("password", firstPassword)
-  ])
+  ], guestHeaders)
   doAssert oldLogin.code in [401, 200], "Old password should no longer work."
   doAssert "Invalid username or password." in oldLogin.body, "Old-password rejection missing."
 
-  let newLogin = postForm(curl, "/login", @[
+  let newLoginCsrf = loadGuestCsrf(curl, "/login", guestHeaders)
+  let newLogin = postFormWithHeaders(curl, "/login", @[
+    ("csrf", newLoginCsrf),
     ("username", accountName),
     ("password", secondPassword)
-  ])
+  ], guestHeaders)
   doAssert newLogin.code in [200, 302, 405], "New password login failed."
   let newSessionCookie = extractNamedCookie(newLogin.headers, "nobby_session")
   doAssert newSessionCookie.startsWith("nobby_session="), "New login should return a session cookie."
@@ -766,9 +847,11 @@ proc main() =
   doAssert guestTopicCreate.code == 401, "Guest topic create should be blocked."
 
   echo "Testing forgot-username flow."
-  let forgotUsernameRes = postForm(curl, "/forgot-username", @[
+  let forgotUsernameCsrf = loadGuestCsrf(curl, "/forgot-username", guestHeaders)
+  let forgotUsernameRes = postFormWithHeaders(curl, "/forgot-username", @[
+    ("csrf", forgotUsernameCsrf),
     ("email", accountEmail)
-  ])
+  ], guestHeaders)
   doAssert forgotUsernameRes.code == 200, "Forgot-username request should succeed."
   doAssert "If that email exists, a username reminder was sent." in forgotUsernameRes.body,
     "Forgot-username confirmation missing."

@@ -641,9 +641,11 @@ proc registerPageHandler(request: Request) {.gcsafe.} =
 proc registerSubmitHandler(request: Request) {.gcsafe.} =
   ## Handles register page POST.
   try:
+    let form = request.parseFormBody()
+    if not request.requireCsrf("registerSubmitHandler", form):
+      return
     let
       csrf = request.csrfForRequest()
-      form = request.parseFormBody()
       username = cleanUsername(form.formValue("username"))
       email = cleanEmail(form.formValue("email"))
       password = form.formValue("password")
@@ -732,9 +734,11 @@ proc loginPageHandler(request: Request) {.gcsafe.} =
 proc loginSubmitHandler(request: Request) {.gcsafe.} =
   ## Handles login page POST.
   try:
+    let form = request.parseFormBody()
+    if not request.requireCsrf("loginSubmitHandler", form):
+      return
     let
       csrf = request.csrfForRequest()
-      form = request.parseFormBody()
       username = cleanUsername(form.formValue("username"))
       password = form.formValue("password")
       user = pool.authenticateUser(serverSecret(), username, password)
@@ -811,9 +815,11 @@ proc forgotPasswordPageHandler(request: Request) {.gcsafe.} =
 proc forgotPasswordSubmitHandler(request: Request) {.gcsafe.} =
   ## Handles forgot-password page POST.
   try:
+    let form = request.parseFormBody()
+    if not request.requireCsrf("forgotPasswordSubmitHandler", form):
+      return
     let
       csrf = request.csrfForRequest()
-      form = request.parseFormBody()
       email = cleanEmail(form.formValue("email"))
       user = pool.getUserByEmail(email)
     if not user.isNil:
@@ -854,9 +860,11 @@ proc resetPasswordPageHandler(request: Request) {.gcsafe.} =
 proc resetPasswordSubmitHandler(request: Request) {.gcsafe.} =
   ## Handles reset-password page POST.
   try:
+    let form = request.parseFormBody()
+    if not request.requireCsrf("resetPasswordSubmitHandler", form):
+      return
     let
       csrf = request.csrfForRequest()
-      form = request.parseFormBody()
       token = form.formValue("token")
       password = form.formValue("password")
       repeatPassword = form.formValue("repeatPassword")
@@ -928,9 +936,11 @@ proc forgotUsernamePageHandler(request: Request) {.gcsafe.} =
 proc forgotUsernameSubmitHandler(request: Request) {.gcsafe.} =
   ## Handles forgot-username page POST.
   try:
+    let form = request.parseFormBody()
+    if not request.requireCsrf("forgotUsernameSubmitHandler", form):
+      return
     let
       csrf = request.csrfForRequest()
-      form = request.parseFormBody()
       email = cleanEmail(form.formValue("email"))
       user = pool.getUserByEmail(email)
     if not user.isNil:
