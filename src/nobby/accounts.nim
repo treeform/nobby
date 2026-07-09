@@ -52,6 +52,9 @@ type
     usedAt*: int64
     createdAt*: int64
 
+  CountRow = ref object
+    count: int
+
 proc initAccountsSchema*(pool: Pool) =
   ## Creates account-related tables and indexes if needed.
   pool.withDb:
@@ -156,9 +159,12 @@ proc getPasswordResetToken*(pool: Pool, token: string): PasswordResetToken =
 
 proc countUsers*(pool: Pool): int =
   ## Returns total account count.
-  let rows = pool.query("SELECT COUNT(*) FROM account_user")
-  if rows.len > 0 and rows[0].len > 0:
-    return rows[0][0].parseInt()
+  let rows = pool.query(
+    CountRow,
+    "SELECT COUNT(*) AS count FROM account_user"
+  )
+  if rows.len > 0:
+    return rows[0].count
 
 proc listUserStats*(
   pool: Pool,

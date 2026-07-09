@@ -1,5 +1,5 @@
 import
-  std/[strutils, times],
+  std/times,
   debby/[pools, sqlite]
 
 type
@@ -16,6 +16,7 @@ type
     boardId*: int
     title*: string
     authorName*: string
+    locked*: bool
     createdAt*: int64
     updatedAt*: int64
 
@@ -41,10 +42,59 @@ type
   TopicStats* = object
     topic*: Topic
     replyCount*: int
+    recentPostCount*: int
+    isHot*: bool
+
+  CountRow = ref object
+    count: int
+
+  LastPostRow = ref object
+    createdAt: int64
+    authorName: string
+    topicId: int
+    topicTitle: string
+
+  BoardStatsRow = ref object
+    id: int
+    section: string
+    slug: string
+    title: string
+    description: string
+    createdAt: int64
+    topicCount: int
+    postCount: int
+    lastCreatedAt: int64
+    lastAuthorName: string
+    lastTopicId: int
+    lastTopicTitle: string
+
+  TopicStatsRow = ref object
+    id: int
+    boardId: int
+    title: string
+    authorName: string
+    locked: bool
+    createdAt: int64
+    updatedAt: int64
+    postCount: int
+    recentPostCount: int
+
+const
+  HotWindowSeconds* = 60 * 60 * 24
+  HotRecentPostMin* = 5
 
 proc nowEpoch*(): int64 =
   ## Returns current Unix timestamp.
   getTime().toUnix()
+
+proc topicIsHot*(locked: bool, recentPostCount: int): bool =
+  ## Returns true when a topic should show the hot icon.
+  not locked and recentPostCount >= HotRecentPostMin
+
+proc countValue(rows: seq[CountRow]): int =
+  ## Returns the first count value from a COUNT query.
+  if rows.len > 0:
+    return rows[0].count
 
 proc newForumPool*(dbPath = "forum.db", poolSize = 10): Pool =
   ## Creates a DB pool for forum requests.
@@ -69,6 +119,16 @@ proc initSchema*(pool: Pool) =
     db.createIndexIfNotExists(Board, "slug")
     if not db.tableExists(Topic):
       db.createTable(Topic)
+    let topicColumns = db.query("PRAGMA table_info(topic)")
+    var hasLocked = false
+    for topicColumn in topicColumns:
+      if topicColumn.len > 1 and topicColumn[1] == "locked":
+        hasLocked = true
+        break
+    if not hasLocked:
+      discard db.query(
+        "ALTER TABLE topic ADD COLUMN locked INTEGER NOT NULL DEFAULT 0"
+      )
     db.checkTable(Topic)
     db.createIndexIfNotExists(Topic, "boardId")
     db.createIndexIfNotExists(Topic, "updatedAt")
@@ -111,44 +171,68 @@ proc getBoardById*(pool: Pool, boardId: int): Board =
 
 proc countTopicsByBoard*(pool: Pool, boardId: int): int =
   ## Counts topics in a board.
-  let rows = pool.query(
-    "SELECT COUNT(*) FROM topic WHERE board_id = ?",
+  countValue(pool.query(
+    CountRow,
+    "SELECT COUNT(*) AS count FROM topic WHERE board_id = ?",
     boardId
-  )
-  if rows.len > 0 and rows[0].len > 0:
-    return rows[0][0].parseInt()
+  ))
 
 proc countPostsByBoard*(pool: Pool, boardId: int): int =
   ## Counts all posts in all topics for one board.
-  let rows = pool.query(
-    "SELECT COUNT(*) FROM post p JOIN topic t ON p.topic_id = t.id WHERE t.board_id = ?",
+  countValue(pool.query(
+    CountRow,
+    """
+    SELECT COUNT(*) AS count
+    FROM post p
+    JOIN topic t ON p.topic_id = t.id
+    WHERE t.board_id = ?
+    """,
     boardId
-  )
-  if rows.len > 0 and rows[0].len > 0:
-    return rows[0][0].parseInt()
+  ))
 
 proc getLastPostByBoard*(pool: Pool, boardId: int): BoardLastPost =
   ## Returns latest post metadata for one board.
   let rows = pool.query(
-    "SELECT p.created_at, p.author_name, t.id, t.title FROM post p JOIN topic t ON p.topic_id = t.id WHERE t.board_id = ? ORDER BY p.created_at DESC, p.id DESC LIMIT 1",
+    LastPostRow,
+    """
+    SELECT
+      p.created_at AS created_at,
+      p.author_name AS author_name,
+      t.id AS topic_id,
+      t.title AS topic_title
+    FROM post p
+    JOIN topic t ON p.topic_id = t.id
+    WHERE t.board_id = ?
+    ORDER BY p.created_at DESC, p.id DESC
+    LIMIT 1
+    """,
     boardId
   )
-  if rows.len == 0 or rows[0].len < 4:
+  if rows.len == 0:
     return
-  result.createdAt = rows[0][0].parseBiggestInt().int64
-  result.authorName = rows[0][1]
-  result.topicId = rows[0][2].parseInt()
-  result.topicTitle = rows[0][3]
+  result.createdAt = rows[0].createdAt
+  result.authorName = rows[0].authorName
+  result.topicId = rows[0].topicId
+  result.topicTitle = rows[0].topicTitle
 
 proc listBoardStats*(pool: Pool): seq[BoardStats] =
   ## Lists boards with topic/post counts and last post in one query.
   let rows = pool.query(
+    BoardStatsRow,
     """
     SELECT
-      b.id, b.section, b.slug, b.title, b.description, b.created_at,
-      COALESCE(tc.cnt, 0),
-      COALESCE(pc.cnt, 0),
-      lp.created_at, lp.author_name, lp.topic_id, lp.topic_title
+      b.id AS id,
+      b.section AS section,
+      b.slug AS slug,
+      b.title AS title,
+      b.description AS description,
+      b.created_at AS created_at,
+      COALESCE(tc.cnt, 0) AS topic_count,
+      COALESCE(pc.cnt, 0) AS post_count,
+      COALESCE(lp.created_at, 0) AS last_created_at,
+      COALESCE(lp.author_name, '') AS last_author_name,
+      COALESCE(lp.topic_id, 0) AS last_topic_id,
+      COALESCE(lp.topic_title, '') AS last_topic_title
     FROM board b
     LEFT JOIN (
       SELECT board_id, COUNT(*) AS cnt
@@ -181,25 +265,23 @@ proc listBoardStats*(pool: Pool): seq[BoardStats] =
     """
   )
   for row in rows:
-    if row.len < 12:
-      continue
     var lastPost: BoardLastPost
-    if row[10].len > 0:
-      lastPost.createdAt = row[8].parseBiggestInt().int64
-      lastPost.authorName = row[9]
-      lastPost.topicId = row[10].parseInt()
-      lastPost.topicTitle = row[11]
+    if row.lastTopicId > 0:
+      lastPost.createdAt = row.lastCreatedAt
+      lastPost.authorName = row.lastAuthorName
+      lastPost.topicId = row.lastTopicId
+      lastPost.topicTitle = row.lastTopicTitle
     result.add(BoardStats(
       board: Board(
-        id: row[0].parseInt(),
-        section: row[1],
-        slug: row[2],
-        title: row[3],
-        description: row[4],
-        createdAt: row[5].parseBiggestInt().int64
+        id: row.id,
+        section: row.section,
+        slug: row.slug,
+        title: row.title,
+        description: row.description,
+        createdAt: row.createdAt
       ),
-      topicCount: row[6].parseInt(),
-      postCount: row[7].parseInt(),
+      topicCount: row.topicCount,
+      postCount: row.postCount,
       lastPost: lastPost
     ))
 
@@ -228,55 +310,74 @@ proc listTopicStatsByBoard*(
   page = 1,
   pageSize = 30
 ): seq[TopicStats] =
-  ## Lists paged topics with reply counts in one query.
+  ## Lists paged topics with reply and recent-activity counts.
   let
     safePage = max(1, page)
     safePageSize = max(1, pageSize)
     offset = (safePage - 1) * safePageSize
+    recentAfter = nowEpoch() - HotWindowSeconds.int64
   let rows = pool.query(
+    TopicStatsRow,
     """
     SELECT
-      t.id, t.board_id, t.title, t.author_name, t.created_at, t.updated_at,
+      t.id AS id,
+      t.board_id AS board_id,
+      t.title AS title,
+      t.author_name AS author_name,
+      t.locked AS locked,
+      t.created_at AS created_at,
+      t.updated_at AS updated_at,
       COALESCE((
         SELECT COUNT(*) FROM post p WHERE p.topic_id = t.id
-      ), 0)
+      ), 0) AS post_count,
+      COALESCE((
+        SELECT COUNT(*) FROM post p
+        WHERE p.topic_id = t.id AND p.created_at >= ?
+      ), 0) AS recent_post_count
     FROM topic t
     WHERE t.board_id = ?
     ORDER BY t.updated_at DESC, t.id DESC
     LIMIT ? OFFSET ?
     """,
+    recentAfter,
     boardId,
     safePageSize,
     offset
   )
   for row in rows:
-    if row.len < 7:
-      continue
-    let postCount = row[6].parseInt()
     result.add(TopicStats(
       topic: Topic(
-        id: row[0].parseInt(),
-        boardId: row[1].parseInt(),
-        title: row[2],
-        authorName: row[3],
-        createdAt: row[4].parseBiggestInt().int64,
-        updatedAt: row[5].parseBiggestInt().int64
+        id: row.id,
+        boardId: row.boardId,
+        title: row.title,
+        authorName: row.authorName,
+        locked: row.locked,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt
       ),
-      replyCount: max(0, postCount - 1)
+      replyCount: max(0, row.postCount - 1),
+      recentPostCount: row.recentPostCount,
+      isHot: topicIsHot(row.locked, row.recentPostCount)
     ))
 
 proc getTopicById*(pool: Pool, topicId: int): Topic =
   ## Finds topic by id.
   pool.get(Topic, topicId)
 
+proc setTopicLocked*(pool: Pool, topic: Topic, locked: bool) =
+  ## Sets whether a topic accepts new replies.
+  if topic.isNil:
+    return
+  topic.locked = locked
+  pool.update(topic)
+
 proc countPostsByTopic*(pool: Pool, topicId: int): int =
   ## Counts posts in a topic.
-  let rows = pool.query(
-    "SELECT COUNT(*) FROM post WHERE topic_id = ?",
+  countValue(pool.query(
+    CountRow,
+    "SELECT COUNT(*) AS count FROM post WHERE topic_id = ?",
     topicId
-  )
-  if rows.len > 0 and rows[0].len > 0:
-    return rows[0][0].parseInt()
+  ))
 
 proc listPostsByTopic*(
   pool: Pool,

@@ -518,6 +518,62 @@ proc main() =
   doAssert accountName in authTopicHtml, "Logged-in username not used for posting."
   doAssert "SpoofAuthorShouldNotAppear" notin authTopicHtml, "Form author should be ignored while logged in."
 
+  echo "Testing topic lock and hot icons."
+  let otherLogin = postForm(curl, "/login", @[
+    ("username", otherAccountName),
+    ("password", firstPassword)
+  ])
+  doAssert otherLogin.code in [200, 302, 405], "Other account login failed."
+  let otherSessionCookie = extractNamedCookie(otherLogin.headers, "nobby_session")
+  doAssert otherSessionCookie.startsWith("nobby_session="), "Other login missing session."
+  var otherAuthHeaders: HttpHeaders
+  otherAuthHeaders["Cookie"] = otherSessionCookie
+  let otherBoard = curl.get(BaseUrl & boardPath, otherAuthHeaders)
+  let otherCsrf = extractInputValue(otherBoard.body, "csrf")
+  doAssert otherCsrf.len > 0, "Other user board page should include csrf."
+  let otherCsrfCookie = extractNamedCookie(otherBoard.headers, "nobby_csrf")
+  if otherCsrfCookie.len > 0:
+    otherAuthHeaders["Cookie"] = mergeCookieHeader(otherAuthHeaders["Cookie"], otherCsrfCookie)
+  let nonAdminLock = postFormWithHeaders(curl, authTopicPath & "/lock", @[
+    ("csrf", otherCsrf)
+  ], otherAuthHeaders)
+  doAssert nonAdminLock.code == 403, "Non-admin lock should be forbidden."
+  let adminTopicPage = curl.get(BaseUrl & authTopicPath, authHeaders).body
+  doAssert "Lock topic" in adminTopicPage, "Admin should see lock control."
+  let lockRes = postFormWithHeaders(curl, authTopicPath & "/lock", @[
+    ("csrf", csrfToken)
+  ], authHeaders)
+  doAssert lockRes.code in [200, 302, 405], "Admin lock failed."
+  let lockedTopicPage = curl.get(BaseUrl & authTopicPath, authHeaders).body
+  doAssert "This topic is locked." in lockedTopicPage, "Locked topic should show notice."
+  doAssert "Unlock topic" in lockedTopicPage, "Admin should see unlock control."
+  let lockedReply = postFormWithHeaders(curl, authTopicPath & "/reply", @[
+    ("csrf", csrfToken),
+    ("body", "Should fail line 1.\nline 2\nline 3\nline 4")
+  ], authHeaders)
+  doAssert lockedReply.code == 403, "Reply to locked topic should be forbidden."
+  let boardAfterLock = curl.get(BaseUrl & boardPath, authHeaders).body
+  doAssert "topic-locked.svg" in boardAfterLock, "Locked topic should use locked icon."
+  let unlockRes = postFormWithHeaders(curl, authTopicPath & "/unlock", @[
+    ("csrf", csrfToken)
+  ], authHeaders)
+  doAssert unlockRes.code in [200, 302, 405], "Admin unlock failed."
+  let unlockedTopicPage = curl.get(BaseUrl & authTopicPath, authHeaders).body
+  doAssert "Lock topic" in unlockedTopicPage, "Unlocked topic should show lock control again."
+  accountDbPool.withDb:
+    let hotTopicId = authTopicPath.split('/')[^1]
+    let baseTs = epochTime().int64 - 60
+    for i in 1 .. 5:
+      discard db.query(
+        "INSERT INTO post (topic_id, author_name, body, created_at) VALUES (?, ?, ?, ?)",
+        hotTopicId,
+        accountName,
+        "Hot filler " & $i & "\nline 2\nline 3\nline 4",
+        baseTs + i
+      )
+  let boardAfterHot = curl.get(BaseUrl & boardPath, authHeaders).body
+  doAssert "topic-hot.svg" in boardAfterHot, "Recently active topic should use hot icon."
+
   echo "Testing forgot-password and reset-password flow."
   let forgotPasswordRes = postForm(curl, "/forgot-password", @[
     ("email", accountEmail)

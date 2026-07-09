@@ -16,6 +16,23 @@ type
   TopicRow* = object
     topic*: Topic
     replyCount*: int
+    isHot*: bool
+
+proc topicIconPath(topic: Topic, isHot: bool): string =
+  ## Chooses the board-list icon for one topic.
+  if topic.locked:
+    return "/images/topic-locked.svg"
+  if isHot:
+    return "/images/topic-hot.svg"
+  "/images/topic.svg"
+
+proc topicIconAlt(topic: Topic, isHot: bool): string =
+  ## Chooses the board-list icon alt text for one topic.
+  if topic.locked:
+    return "Locked topic icon"
+  if isHot:
+    return "Hot topic icon"
+  "Topic icon"
 
 proc fmtEpoch(ts: int64): string =
   ## Formats Unix timestamp for page output.
@@ -239,12 +256,15 @@ proc renderBoardPage*(
           tr:
             td ".row1 iconcell":
               img ".forum-icon":
-                src "/images/topic.svg"
-                alt "Topic icon"
+                src topicIconPath(row.topic, row.isHot)
+                alt topicIconAlt(row.topic, row.isHot)
             td ".row2":
               a ".topiclink":
                 href "/t/" & $row.topic.id
                 say esc(row.topic.title)
+              if row.topic.locked:
+                p ".smalltext":
+                  say "Locked"
             td ".row1 center foldable":
               a ".topiclink":
                 href "/u/" & row.topic.authorName
@@ -289,6 +309,50 @@ proc renderReplyForm(topic: Topic, csrfToken: string): string =
                   ttype "submit"
                   say "Post reply"
 
+proc renderLockedNotice(): string =
+  ## Renders a notice that the topic no longer accepts replies.
+  renderFragment:
+    section "#compose.section":
+      table ".grid":
+        tr:
+          td ".toprow":
+            say "Topic locked"
+        tr:
+          td ".row2":
+            p ".smalltext":
+              say "This topic is locked. New replies are disabled."
+
+proc renderAdminLockForm(topic: Topic, csrfToken: string): string =
+  ## Renders admin lock or unlock controls for one topic.
+  let
+    csrfField = renderCsrfField(csrfToken)
+    actionPath =
+      if topic.locked:
+        "/t/" & $topic.id & "/unlock"
+      else:
+        "/t/" & $topic.id & "/lock"
+    buttonLabel =
+      if topic.locked:
+        "Unlock topic"
+      else:
+        "Lock topic"
+  renderFragment:
+    section "#compose.section":
+      table ".grid":
+        tr:
+          td ".toprow":
+            say "Admin"
+        tr:
+          td ".row2":
+            form ".post-form":
+              action actionPath
+              tmethod "post"
+              say csrfField
+              tdiv ".form-actions":
+                button ".btn":
+                  ttype "submit"
+                  say buttonLabel
+
 proc renderTopicPage*(
   topic: Topic,
   posts: seq[Post],
@@ -298,7 +362,8 @@ proc renderTopicPage*(
   boardTitle = "",
   boardSlug = "",
   authorStatuses: seq[(string, string)] = @[],
-  csrfToken = ""
+  csrfToken = "",
+  isAdmin = false
 ): string =
   ## Renders topic and replies page.
   proc statusForAuthor(authorName: string): string =
@@ -310,10 +375,17 @@ proc renderTopicPage*(
     basePath = "/t/" & $topic.id
     pagination = renderPagination(basePath, page, pages)
     replyForm =
-      if currentUsername.len > 0:
+      if topic.locked:
+        renderLockedNotice()
+      elif currentUsername.len > 0:
         renderReplyForm(topic, csrfToken)
       else:
         renderLoginRequired("Reply")
+    adminForm =
+      if isAdmin:
+        renderAdminLockForm(topic, csrfToken)
+      else:
+        ""
   let content = renderFragment:
     section "#post.section":
       say pagination
@@ -340,6 +412,7 @@ proc renderTopicPage*(
             td ".row1":
               say fmtEpoch(post.createdAt)
       say pagination
+      say adminForm
       say replyForm
   var breadcrumb = @[("Index", "/")]
   if boardTitle.len > 0:
@@ -353,5 +426,6 @@ proc renderTopicPage*(
     content,
     currentUsername,
     breadcrumb,
+    isAdmin,
     csrfToken = csrfToken
   )

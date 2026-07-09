@@ -332,7 +332,11 @@ proc boardHandler(request: Request) {.gcsafe.} =
     let pages = totalPages(topicCount, PageSize)
     var rows: seq[TopicRow]
     for stats in pool.listTopicStatsByBoard(board.id, page, PageSize):
-      rows.add(TopicRow(topic: stats.topic, replyCount: stats.replyCount))
+      rows.add(TopicRow(
+        topic: stats.topic,
+        replyCount: stats.replyCount,
+        isHot: stats.isHot
+      ))
     let body = renderBoardPage(
       board,
       rows,
@@ -397,6 +401,7 @@ proc topicHandler(request: Request) {.gcsafe.} =
         continue
       authorStatuses.add((user.username, user.userStatus))
     let board = pool.getBoardById(topic.boardId)
+    let isAdmin = not currentUser.isNil and currentUser.isAdmin
     let body = renderTopicPage(
       topic,
       posts,
@@ -406,7 +411,8 @@ proc topicHandler(request: Request) {.gcsafe.} =
       if board.isNil: "" else: board.title,
       if board.isNil: "" else: board.slug,
       authorStatuses,
-      csrf.token
+      csrf.token,
+      isAdmin
     )
     request.respondHtml(
       200,
@@ -500,11 +506,22 @@ proc replyHandler(request: Request) {.gcsafe.} =
         if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
       )
       return
-    if pool.getTopicById(topicId).isNil:
+    let topic = pool.getTopicById(topicId)
+    if topic.isNil:
       request.respondErrorPage(
         "replyHandler",
         404,
         "Topic not found.",
+        currentUsername,
+        csrf.token,
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+      )
+      return
+    if topic.locked:
+      request.respondErrorPage(
+        "replyHandler",
+        403,
+        "This topic is locked.",
         currentUsername,
         csrf.token,
         if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
@@ -555,6 +572,69 @@ proc replyHandler(request: Request) {.gcsafe.} =
   except Exception as e:
     logHandlerException("replyHandler", request, e)
     request.respondInternalError()
+
+proc setTopicLockHandler(request: Request, locked: bool) {.gcsafe.} =
+  ## Handles admin lock or unlock for one topic.
+  let routeName =
+    if locked:
+      "lockTopicHandler"
+    else:
+      "unlockTopicHandler"
+  try:
+    let
+      currentUser = pool.getCurrentUser(request)
+      currentUsername = currentUsernameOf(currentUser)
+      csrf = request.csrfForRequest()
+      topicId = parsePositiveInt(request.pathParams["id"])
+      csrfCookies =
+        if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
+    if topicId == 0:
+      request.respondErrorPage(
+        routeName,
+        400,
+        "Bad topic id.",
+        currentUsername,
+        csrf.token,
+        csrfCookies
+      )
+      return
+    let topic = pool.getTopicById(topicId)
+    if topic.isNil:
+      request.respondErrorPage(
+        routeName,
+        404,
+        "Topic not found.",
+        currentUsername,
+        csrf.token,
+        csrfCookies
+      )
+      return
+    if currentUser.isNil or not currentUser.isAdmin:
+      request.respondErrorPage(
+        routeName,
+        403,
+        "Admin access required.",
+        currentUsername,
+        csrf.token,
+        csrfCookies
+      )
+      return
+    let form = request.parseFormBody()
+    if not request.requireCsrf(routeName, form, currentUsername):
+      return
+    pool.setTopicLocked(topic, locked)
+    request.respondRedirect("/t/" & $topic.id)
+  except Exception as e:
+    logHandlerException(routeName, request, e)
+    request.respondInternalError()
+
+proc lockTopicHandler(request: Request) {.gcsafe.} =
+  ## Locks one topic so replies are disabled.
+  request.setTopicLockHandler(true)
+
+proc unlockTopicHandler(request: Request) {.gcsafe.} =
+  ## Unlocks one topic so replies are enabled.
+  request.setTopicLockHandler(false)
 
 proc registerPageHandler(request: Request) {.gcsafe.} =
   ## Handles register page GET.
@@ -1071,6 +1151,8 @@ router.get("/b/@slug", boardHandler)
 router.get("/t/@id", topicHandler)
 router.post("/b/@slug/new", newTopicHandler)
 router.post("/t/@id/reply", replyHandler)
+router.post("/t/@id/lock", lockTopicHandler)
+router.post("/t/@id/unlock", unlockTopicHandler)
 
 router.notFoundHandler = proc(request: Request) {.gcsafe.} =
   let
