@@ -260,6 +260,13 @@ proc makePasswordHash*(
   let digest = pbkdf2(input, salt, iterations)
   bytesToHex(digest)
 
+proc constantTimeEquals(a, b: array[32, uint8]): bool =
+  ## Compares two digests without early exit on the first mismatch.
+  var diff: uint8 = 0
+  for i in 0 ..< 32:
+    diff = diff or (a[i] xor b[i])
+  diff == 0
+
 proc verifyPasswordHash*(
   serverSecret: string,
   username: string,
@@ -272,10 +279,7 @@ proc verifyPasswordHash*(
   let input = serverSecret & ":" & username & ":" & password
   let expected = hexToBytes32(expectedHash)
   let actual = pbkdf2(input, salt, iterations)
-  for i in 0 ..< 32:
-    if actual[i] != expected[i]:
-      return false
-  true
+  constantTimeEquals(actual, expected)
 
 proc nowEpoch*(): int64 =
   ## Returns current unix timestamp.
