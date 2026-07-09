@@ -239,7 +239,18 @@ proc main() =
     ("password", firstPassword)
   ])
   doAssert goodLogin.code in [200, 302, 405], "Good login failed."
-  let sessionCookie = extractCookie(goodLogin.headers["Set-Cookie"])
+  var sessionSetCookie = ""
+  for (key, value) in goodLogin.headers:
+    if cmpIgnoreCase(key, "Set-Cookie") == 0 and value.startsWith("nobby_session="):
+      sessionSetCookie = value
+      break
+  doAssert sessionSetCookie.len > 0, "Login did not return session cookie."
+  doAssert "HttpOnly" in sessionSetCookie, "Session cookie should be HttpOnly."
+  doAssert "SameSite=Lax" in sessionSetCookie, "Session cookie should use SameSite=Lax."
+  doAssert "Max-Age=" in sessionSetCookie, "Session cookie should set Max-Age."
+  doAssert "Secure" notin sessionSetCookie,
+    "Local HTTP tests should omit Secure unless NOBBY_SECURE_COOKIES is set."
+  let sessionCookie = extractCookie(sessionSetCookie)
   doAssert sessionCookie.startsWith("nobby_session="), "Login did not return session cookie."
   var authHeaders: HttpHeaders
   authHeaders["Cookie"] = sessionCookie

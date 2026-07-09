@@ -701,7 +701,7 @@ proc logoutHandler(request: Request) {.gcsafe.} =
       return
     let token = request.sessionCookieValue()
     pool.clearSession(token)
-    request.respondRedirect("/", @[makeClearSessionCookie()])
+    request.respondRedirect("/", @[makeClearSessionCookie(), makeClearCsrfCookie()])
   except Exception as e:
     logHandlerException("logoutHandler", request, e)
     request.respondInternalError()

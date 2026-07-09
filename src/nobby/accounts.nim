@@ -308,25 +308,43 @@ proc csrfCookieValue*(request: Request): string =
   ## Returns CSRF token from request cookies.
   parseCookieValue(request.headers["Cookie"], "nobby_csrf")
 
+proc secureCookiesEnabled*(): bool =
+  ## Returns true when Secure cookie attributes should be set.
+  let value = getEnv("NOBBY_SECURE_COOKIES").strip().toLowerAscii()
+  value in ["1", "true", "yes", "on"]
+
+proc cookieSecuritySuffix*(): string =
+  ## Returns optional Secure attribute for cookie headers.
+  if secureCookiesEnabled():
+    return "; Secure"
+  ""
+
 proc makeCsrfToken*(): string =
   ## Generates one CSRF token value as hex.
   randomHex(TokenBytes)
 
 proc makeCsrfSetCookie*(token: string): string =
   ## Builds Set-Cookie header for a CSRF token.
-  "nobby_csrf=" & token & "; Path=/; SameSite=Lax"
+  "nobby_csrf=" & token & "; Path=/; SameSite=Lax" & cookieSecuritySuffix()
+
+proc makeClearCsrfCookie*(): string =
+  ## Builds Set-Cookie header to clear a CSRF token.
+  "nobby_csrf=; Path=/; SameSite=Lax; Max-Age=0" & cookieSecuritySuffix()
 
 proc csrfTokensMatch*(cookieToken: string, formToken: string): bool =
   ## Returns true when cookie and form CSRF tokens are present and equal.
   cookieToken.len > 0 and formToken.len > 0 and cookieToken == formToken
 
-proc makeSessionSetCookie*(token: string): string =
+proc makeSessionSetCookie*(token: string, ttlSeconds = 60 * 60 * 24 * 30): string =
   ## Builds Set-Cookie header for a session token.
-  "nobby_session=" & token & "; Path=/; HttpOnly; SameSite=Lax"
+  "nobby_session=" & token &
+    "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" & $ttlSeconds &
+    cookieSecuritySuffix()
 
 proc makeClearSessionCookie*(): string =
   ## Builds Set-Cookie header to clear a session token.
-  "nobby_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+  "nobby_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" &
+    cookieSecuritySuffix()
 
 proc createSession*(pool: Pool, userId: int, ttlSeconds = 60 * 60 * 24 * 30): UserSession =
   ## Creates and stores one user session token.
