@@ -577,7 +577,7 @@ proc registerSubmitHandler(request: Request) {.gcsafe.} =
       repeatPassword = form.formValue("repeatPassword")
       csrfCookies =
         if csrf.setCookie.len > 0: @[csrf.setCookie] else: @[]
-    if username.len < 3 or email.len < 3 or password.len < 6:
+    if username.len < UsernameMinLen or email.len < 3 or password.len < 6:
       logValidationFailure("registerSubmitHandler", request, "username/email/password are too short")
       let invalidForm = renderRegisterPage(
         "Username/email/password are too short.",
@@ -586,6 +586,16 @@ proc registerSubmitHandler(request: Request) {.gcsafe.} =
         csrf.token
       )
       request.respondHtml(400, invalidForm, csrfCookies)
+      return
+    if not isValidUsername(username):
+      logValidationFailure("registerSubmitHandler", request, "username has invalid characters")
+      let invalidName = renderRegisterPage(
+        "Username must be 3-30 ASCII letters, digits, _ or -.",
+        username,
+        email,
+        csrf.token
+      )
+      request.respondHtml(400, invalidName, csrfCookies)
       return
     if password != repeatPassword:
       logValidationFailure("registerSubmitHandler", request, "passwords do not match")

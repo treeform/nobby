@@ -204,6 +204,24 @@ proc main() =
   ])
   doAssert registerRes.code in [200, 302, 405],
     "Register request failed with code " & $registerRes.code & ". Body:\n" & registerRes.body
+  let unicodeNameRes = postForm(curl, "/register", @[
+    ("username", "usérname"),
+    ("email", "unicode_" & accountEmail),
+    ("password", firstPassword),
+    ("repeatPassword", firstPassword)
+  ])
+  doAssert unicodeNameRes.code == 400, "Unicode username should be rejected."
+  doAssert "ASCII letters" in unicodeNameRes.body,
+    "Unicode username should return ASCII validation error."
+  let spacedNameRes = postForm(curl, "/register", @[
+    ("username", "bad name"),
+    ("email", "space_" & accountEmail),
+    ("password", firstPassword),
+    ("repeatPassword", firstPassword)
+  ])
+  doAssert spacedNameRes.code == 400, "Spaced username should be rejected."
+  doAssert "ASCII letters" in spacedNameRes.body,
+    "Spaced username should return ASCII validation error."
   let caseVariantName = accountName[0].toUpperAscii() & accountName[1 .. ^1]
   let caseVariantRes = postForm(curl, "/register", @[
     ("username", caseVariantName),

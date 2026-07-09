@@ -14,6 +14,9 @@ const
   TokenBytes = 24
   ServerSecretPath* = "server.secret"
   ServerSecretBytes = 32
+  UsernameMinLen* = 3
+  UsernameMaxLen* = 30
+  UsernameAllowedChars = {'a'..'z', 'A'..'Z', '0'..'9', '_', '-'}
 
 proc nowEpoch*(): int64
 proc syncUserCounters*(pool: Pool)
@@ -299,8 +302,17 @@ proc nowEpoch*(): int64 =
   models.nowEpoch()
 
 proc cleanUsername*(username: string): string =
-  ## Trims and normalizes username text.
+  ## Trims username text.
   username.strip()
+
+proc isValidUsername*(username: string): bool =
+  ## Returns true for ASCII usernames with letters, digits, _ or -.
+  if username.len < UsernameMinLen or username.len > UsernameMaxLen:
+    return false
+  for c in username:
+    if c notin UsernameAllowedChars:
+      return false
+  true
 
 proc cleanEmail*(email: string): string =
   ## Trims and lowercases email text.
@@ -420,6 +432,7 @@ proc createUser*(
   ## Creates one new user with stored PBKDF2 password data.
   let cleanName = cleanUsername(username)
   let cleanMail = cleanEmail(email)
+  doAssert isValidUsername(cleanName), "Username must be ASCII letters, digits, _ or -."
   if not pool.getUserByUsername(cleanName).isNil:
     raise newException(DbError, "UNIQUE constraint failed: username")
   if not pool.getUserByEmail(cleanMail).isNil:
