@@ -597,17 +597,23 @@ proc registerSubmitHandler(request: Request) {.gcsafe.} =
       )
       request.respondHtml(400, mismatch, csrfCookies)
       return
-    if not pool.getUserByUsername(username).isNil:
-      logValidationFailure("registerSubmitHandler", request, "username is already taken")
-      let duplicateName = renderRegisterPage(
-        "Username is already taken.",
-        username,
-        email,
-        csrf.token
-      )
-      request.respondHtml(400, duplicateName, csrfCookies)
-      return
-    if not pool.getUserByEmail(email).isNil:
+    var user: AccountUser
+    try:
+      user = pool.createUser(serverSecret(), username, email, password)
+    except Exception as e:
+      if not isUniqueConstraintError(e):
+        raise
+      if not pool.getUserByUsername(username).isNil or
+        "username" in e.msg.toLowerAscii():
+        logValidationFailure("registerSubmitHandler", request, "username is already taken")
+        let duplicateName = renderRegisterPage(
+          "Username is already taken.",
+          username,
+          email,
+          csrf.token
+        )
+        request.respondHtml(400, duplicateName, csrfCookies)
+        return
       logValidationFailure("registerSubmitHandler", request, "email is already registered")
       let duplicateEmail = renderRegisterPage(
         "Email is already registered.",
@@ -617,7 +623,6 @@ proc registerSubmitHandler(request: Request) {.gcsafe.} =
       )
       request.respondHtml(400, duplicateEmail, csrfCookies)
       return
-    let user = pool.createUser(serverSecret(), username, email, password)
     let session = pool.createSession(user.id)
     var cookies = @[makeSessionSetCookie(session.token)]
     if csrf.setCookie.len > 0:

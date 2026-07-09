@@ -214,6 +214,15 @@ proc main() =
   doAssert caseVariantRes.code == 400, "Case-variant username should be rejected."
   doAssert "Username is already taken." in caseVariantRes.body,
     "Case-variant username should return username taken error."
+  let duplicateEmailRes = postForm(curl, "/register", @[
+    ("username", accountName & "_dup"),
+    ("email", accountEmail),
+    ("password", firstPassword),
+    ("repeatPassword", firstPassword)
+  ])
+  doAssert duplicateEmailRes.code == 400, "Duplicate email should be rejected."
+  doAssert "Email is already registered." in duplicateEmailRes.body,
+    "Duplicate email should return email registered error."
   var accountUserId = ""
   let accountDbPool = newPool()
   accountDbPool.add(openDatabase(tempRoot / "forum.db"))
@@ -225,6 +234,31 @@ proc main() =
     )
     doAssert accountRows.len == 1 and accountRows[0].len > 0, "Register did not create account_user row."
     accountUserId = accountRows[0][0]
+    let indexRows = db.query(
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'account_user'"
+    )
+    var
+      hasUsernameUnique = false
+      hasEmailUnique = false
+    for indexRow in indexRows:
+      if indexRow.len == 0:
+        continue
+      if indexRow[0] == "idx_account_user_username_lower":
+        hasUsernameUnique = true
+      if indexRow[0] == "idx_account_user_email_unique":
+        hasEmailUnique = true
+    doAssert hasUsernameUnique, "Missing unique lower(username) index."
+    doAssert hasEmailUnique, "Missing unique email index."
+    var uniqueInsertFailed = false
+    try:
+      discard db.query(
+        "INSERT INTO account_user (username, email, is_admin, thread_count, post_count, user_status, user_bio, password_salt, password_hash, password_iterations, created_at, updated_at) VALUES (?, ?, 0, 0, 0, '', '', 'salt', 'hash', 1, 0, 0)",
+        accountName & "_raw",
+        accountEmail
+      )
+    except:
+      uniqueInsertFailed = true
+    doAssert uniqueInsertFailed, "Raw duplicate email insert should hit UNIQUE constraint."
 
   echo "Testing login validation."
   let badLogin = postForm(curl, "/login", @[

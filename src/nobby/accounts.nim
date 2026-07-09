@@ -83,23 +83,36 @@ proc initAccountsSchema*(pool: Pool) =
     if not hasUserBio:
       discard db.query("ALTER TABLE account_user ADD COLUMN user_bio TEXT NOT NULL DEFAULT ''")
     db.checkTable(AccountUser)
-    db.createIndexIfNotExists(AccountUser, "username")
-    db.createIndexIfNotExists(AccountUser, "email")
+    # Debby createIndex is non-unique, so enforce uniqueness with raw SQL.
+    discard db.query(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_account_user_username_lower ON account_user(lower(username))"
+    )
+    discard db.query(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_account_user_email_unique ON account_user(email)"
+    )
 
     if not db.tableExists(UserSession):
       db.createTable(UserSession)
     db.checkTable(UserSession)
     db.createIndexIfNotExists(UserSession, "userId")
-    db.createIndexIfNotExists(UserSession, "token")
+    discard db.query(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_session_token_unique ON user_session(token)"
+    )
     db.createIndexIfNotExists(UserSession, "expiresAt")
 
     if not db.tableExists(PasswordResetToken):
       db.createTable(PasswordResetToken)
     db.checkTable(PasswordResetToken)
     db.createIndexIfNotExists(PasswordResetToken, "userId")
-    db.createIndexIfNotExists(PasswordResetToken, "token")
+    discard db.query(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_password_reset_token_token_unique ON password_reset_token(token)"
+    )
     db.createIndexIfNotExists(PasswordResetToken, "expiresAt")
   pool.syncUserCounters()
+
+proc isUniqueConstraintError*(e: ref Exception): bool =
+  ## Returns true when an exception looks like a UNIQUE constraint failure.
+  "UNIQUE" in e.msg.toUpperAscii()
 
 proc getUserByUsername*(pool: Pool, username: string): AccountUser =
   ## Finds one user by username.
@@ -407,6 +420,10 @@ proc createUser*(
   ## Creates one new user with stored PBKDF2 password data.
   let cleanName = cleanUsername(username)
   let cleanMail = cleanEmail(email)
+  if not pool.getUserByUsername(cleanName).isNil:
+    raise newException(DbError, "UNIQUE constraint failed: username")
+  if not pool.getUserByEmail(cleanMail).isNil:
+    raise newException(DbError, "UNIQUE constraint failed: email")
   let ts = nowEpoch()
   let salt = makePasswordSalt()
   result = AccountUser(
@@ -422,7 +439,12 @@ proc createUser*(
     createdAt: ts,
     updatedAt: ts
   )
-  pool.insert(result)
+  try:
+    pool.insert(result)
+  except DbError as e:
+    if isUniqueConstraintError(e):
+      raise e
+    raise
 
 proc authenticateUser*(
   pool: Pool,
