@@ -2,7 +2,8 @@ import
   std/[os, osproc, streams, strutils, times],
   debby/[pools, sqlite],
   webby,
-  curly
+  curly,
+  ../src/nobby/[accounts, models]
 
 const
   BaseUrl = "http://localhost:8080"
@@ -158,6 +159,83 @@ proc main() =
       tempRoot / "nobby-test"
   compileServer(repoRoot, tempServerExe)
   doAssert fileExists(tempServerExe), "Server executable not found at " & tempServerExe
+
+  echo "Testing syncUserCounters preserves updated_at."
+  let counterPool = newForumPool(tempRoot / "counters.db", 1)
+  initSchema(counterPool)
+  initAccountsSchema(counterPool)
+  seedDefaultBoard(counterPool)
+  let counterUser = counterPool.createUser(
+    "test-server-secret",
+    "counter_user",
+    "counter_user@example.com",
+    "Passw0rdOne!"
+  )
+  const FixedUpdatedAt = 1_700_000_000'i64
+  counterPool.withDb:
+    discard db.query(
+      """
+      UPDATE account_user
+      SET updated_at = ?, thread_count = 0, post_count = 0
+      WHERE id = ?
+      """,
+      FixedUpdatedAt,
+      counterUser.id
+    )
+  counterPool.syncUserCounters()
+  counterPool.withDb:
+    let unchangedRows = db.query(
+      """
+      SELECT updated_at, thread_count, post_count
+      FROM account_user WHERE id = ?
+      """,
+      counterUser.id
+    )
+    doAssert unchangedRows.len == 1, "Counter user row missing."
+    doAssert unchangedRows[0][0] == $FixedUpdatedAt,
+      "Matching counters should leave updated_at alone."
+    doAssert unchangedRows[0][1] == "0", "Thread count should stay 0."
+    doAssert unchangedRows[0][2] == "0", "Post count should stay 0."
+  var topic = Topic(
+    boardId: counterPool.listBoards()[0].id,
+    title: "Counter topic",
+    authorName: counterUser.username,
+    createdAt: FixedUpdatedAt,
+    updatedAt: FixedUpdatedAt
+  )
+  counterPool.insert(topic)
+  var post = Post(
+    topicId: topic.id,
+    authorName: counterUser.username,
+    body: "Counter body\nline 2\nline 3\nline 4",
+    createdAt: FixedUpdatedAt
+  )
+  counterPool.insert(post)
+  counterPool.syncUserCounters()
+  var syncedUpdatedAt = ""
+  counterPool.withDb:
+    let syncedRows = db.query(
+      """
+      SELECT updated_at, thread_count, post_count
+      FROM account_user WHERE id = ?
+      """,
+      counterUser.id
+    )
+    doAssert syncedRows.len == 1, "Counter user row missing after sync."
+    doAssert syncedRows[0][1] == "1", "Thread count should recompute to 1."
+    doAssert syncedRows[0][2] == "1", "Post count should recompute to 1."
+    doAssert syncedRows[0][0] != $FixedUpdatedAt,
+      "Changed counters should refresh updated_at."
+    syncedUpdatedAt = syncedRows[0][0]
+  counterPool.syncUserCounters()
+  counterPool.withDb:
+    let stableRows = db.query(
+      "SELECT updated_at FROM account_user WHERE id = ?",
+      counterUser.id
+    )
+    doAssert stableRows.len == 1, "Counter user row missing after second sync."
+    doAssert stableRows[0][0] == syncedUpdatedAt,
+      "Second sync with matching counters should keep updated_at."
 
   var server = startProcess(
     command = tempServerExe,

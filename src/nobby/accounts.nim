@@ -204,18 +204,31 @@ proc syncUserCounters*(pool: Pool) =
   pool.withDb:
     discard db.query(
       """
-      UPDATE account_user
+      UPDATE account_user AS u
       SET
-        thread_count = COALESCE((
-          SELECT COUNT(*) FROM topic WHERE author_name = account_user.username
-        ), 0),
-        post_count = COALESCE((
-          SELECT COUNT(*) FROM post WHERE author_name = account_user.username
-        ), 0),
+        thread_count = c.thread_count,
+        post_count = c.post_count,
         updated_at = ?
+      FROM (
+        SELECT
+          id AS id,
+          COALESCE((
+            SELECT COUNT(*) FROM topic WHERE author_name = account_user.username
+          ), 0) AS thread_count,
+          COALESCE((
+            SELECT COUNT(*) FROM post WHERE author_name = account_user.username
+          ), 0) AS post_count
+        FROM account_user
+      ) AS c
+      WHERE u.id = c.id
+        AND (
+          u.thread_count != c.thread_count
+          OR u.post_count != c.post_count
+        )
       """,
       nowEpoch()
     )
+
 proc bytesToHex(bytes: openArray[byte]): string =
   ## Encodes bytes as lowercase hex.
   for b in bytes:
