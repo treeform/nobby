@@ -31,14 +31,6 @@ proc ensurePortIsFree(client: Curly) =
   except:
     discard
 
-proc stopExistingServer(client: Curly) =
-  ## Attempts to stop a server already running on localhost:8080.
-  try:
-    discard client.get(BaseUrl & "/quit")
-  except:
-    discard
-  sleep(400)
-
 proc compileServer(repoRoot: string, outPath: string) =
   ## Compiles the nobby server executable to the provided output path.
   let command = "nim c --out:" & quoteShell(outPath) & " " &
@@ -121,7 +113,6 @@ proc main() =
   let curl = newCurly()
   defer:
     curl.close()
-  stopExistingServer(curl)
   ensurePortIsFree(curl)
   let tempRoot = repoRoot / "tests" / ".tmp-e2e"
   if dirExists(tempRoot):

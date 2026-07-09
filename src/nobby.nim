@@ -223,11 +223,6 @@ proc respondImage(request: Request) =
   request.logHttpResponse(200)
   request.respond(200, headers, body)
 
-proc quitHandler(request: Request) {.gcsafe.} =
-  ## Stops the server process for local testing workflows.
-  request.logHttpResponse(200)
-  request.respond(200, htmlHeaders(), "Shutting down.")
-  quit(0)
 let pool = newForumPool("forum.db", 10)
 pool.initSchema()
 pool.initAccountsSchema()
@@ -694,7 +689,6 @@ proc editUserSubmitHandler(request: Request) {.gcsafe.} =
 var router: Router
 router.get("/style.css", respondCss)
 router.get("/images/@name", respondImage)
-router.get("/quit", quitHandler)
 router.get("/", indexHandler)
 router.get("/register", registerPageHandler)
 router.post("/register", registerSubmitHandler)
